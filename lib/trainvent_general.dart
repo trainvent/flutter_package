@@ -2,3 +2,4 @@
 library;
 
 export 'src/trainvent_general.dart';
+export 'src/triangle_loading_indicator.dart';

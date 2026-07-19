@@ -1,0 +1,564 @@
+import 'dart:math' as math;
+
+import 'package:flutter/material.dart';
+
+/// An animated loading indicator made from recursively nested triangles.
+///
+/// By default the indicator animates continuously. Supply [progress] to drive
+/// the animation externally, or [iterations] to limit the number of automatic
+/// cycles.
+class TriangleLoadingIndicator extends StatefulWidget {
+  const TriangleLoadingIndicator({
+    super.key,
+    this.size = 48,
+    this.targetDeg = 60,
+    this.trianglesPerCycle = 6,
+    this.buildDuration = const Duration(milliseconds: 1300),
+    this.zoomDuration = const Duration(milliseconds: 800),
+    this.keepHistoryCycles = 2,
+    this.strokeWidth = 2.2,
+    this.strokeColor = const Color(0xFF111111),
+    this.showFill = true,
+    this.baseColor,
+    this.baseHue = 26,
+    this.saturation = 0.73,
+    this.lightness = 0.52,
+    this.hueStep = 7,
+    this.maxDepth = 1500,
+    this.progress,
+    this.iterations,
+    this.removingOld = true,
+    this.zoomSpin = false,
+  }) : assert(iterations == null || iterations > 0);
+
+  final double size;
+  final double targetDeg;
+  final int trianglesPerCycle;
+  final Duration buildDuration;
+  final Duration zoomDuration;
+  final int keepHistoryCycles;
+  final double strokeWidth;
+  final Color strokeColor;
+  final bool showFill;
+  final Color? baseColor;
+  final double baseHue;
+  final double saturation;
+  final double lightness;
+  final double hueStep;
+  final int maxDepth;
+
+  /// Controls a single animation cycle when supplied. Values should be in the
+  /// range 0–1. When omitted, the indicator animates continuously.
+  final Animation<double>? progress;
+
+  /// Number of cycles to play, or null to animate endlessly.
+  ///
+  /// When [progress] is supplied, a non-null value is the number of complete
+  /// cycles represented by that animation. A null value represents one cycle;
+  /// the owner of [progress] controls whether that cycle repeats.
+  final int? iterations;
+
+  /// Removes the surrounding triangles, largest first, before each zoom.
+  final bool removingOld;
+
+  /// Rotates the camera during each zoom so the active triangle stays upright.
+  /// When false, the camera zooms straight and triangle orientation alternates.
+  final bool zoomSpin;
+
+  @override
+  State<TriangleLoadingIndicator> createState() =>
+      _TriangleLoadingIndicatorState();
+}
+
+class _TriangleLoadingIndicatorState extends State<TriangleLoadingIndicator>
+    with SingleTickerProviderStateMixin {
+  late final AnimationController _controller;
+
+  @override
+  void initState() {
+    super.initState();
+    _controller = AnimationController(vsync: this);
+    _syncAutoplay();
+  }
+
+  @override
+  void didUpdateWidget(covariant TriangleLoadingIndicator oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.progress != widget.progress ||
+        oldWidget.iterations != widget.iterations ||
+        oldWidget.buildDuration != widget.buildDuration ||
+        oldWidget.zoomDuration != widget.zoomDuration ||
+        oldWidget.removingOld != widget.removingOld) {
+      _syncAutoplay();
+    }
+  }
+
+  void _syncAutoplay() {
+    _controller.stop();
+    if (widget.progress == null) {
+      final cycleDuration =
+          widget.buildDuration +
+          widget.zoomDuration +
+          (widget.removingOld ? widget.buildDuration : Duration.zero);
+      if (widget.iterations == null) {
+        _controller.repeat(period: cycleDuration);
+      } else {
+        _controller.duration = cycleDuration * widget.iterations!;
+        _controller.forward(from: 0);
+      }
+    }
+  }
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final animation = widget.progress ?? _controller;
+    final cycleDuration =
+        widget.buildDuration +
+        widget.zoomDuration +
+        (widget.removingOld ? widget.buildDuration : Duration.zero);
+    final cycleSeconds =
+        cycleDuration.inMicroseconds / Duration.microsecondsPerSecond;
+
+    return SizedBox(
+      width: widget.size,
+      height: widget.size,
+      child: RepaintBoundary(
+        child: AnimatedBuilder(
+          animation: animation,
+          builder: (context, child) {
+            final tSec =
+                animation.value.clamp(0.0, 1.0) *
+                cycleSeconds *
+                (widget.iterations ?? 1);
+            return CustomPaint(
+              painter: _TriangleLoadingPainter(
+                tSec: tSec,
+                targetDeg: widget.targetDeg,
+                trianglesPerCycle: widget.trianglesPerCycle,
+                buildSeconds:
+                    widget.buildDuration.inMicroseconds /
+                    Duration.microsecondsPerSecond,
+                zoomSeconds:
+                    widget.zoomDuration.inMicroseconds /
+                    Duration.microsecondsPerSecond,
+                keepHistoryCycles: widget.keepHistoryCycles,
+                strokeWidth: widget.strokeWidth,
+                strokeColor: widget.strokeColor,
+                showFill: widget.showFill,
+                baseColor:
+                    widget.baseColor ?? Theme.of(context).colorScheme.primary,
+                baseHue: widget.baseHue,
+                saturation: widget.saturation,
+                lightness: widget.lightness,
+                hueStep: widget.hueStep,
+                maxDepth: widget.maxDepth,
+                removingOld: widget.removingOld,
+                zoomSpin: widget.zoomSpin,
+              ),
+            );
+          },
+        ),
+      ),
+    );
+  }
+}
+
+class _TriangleLoadingPainter extends CustomPainter {
+  _TriangleLoadingPainter({
+    required this.tSec,
+    required this.targetDeg,
+    required this.trianglesPerCycle,
+    required this.buildSeconds,
+    required this.zoomSeconds,
+    required this.keepHistoryCycles,
+    required this.strokeWidth,
+    required this.strokeColor,
+    required this.showFill,
+    required this.baseColor,
+    required this.baseHue,
+    required this.saturation,
+    required this.lightness,
+    required this.hueStep,
+    required this.maxDepth,
+    required this.removingOld,
+    required this.zoomSpin,
+  });
+
+  final double tSec;
+  final double targetDeg;
+  final int trianglesPerCycle;
+  final double buildSeconds;
+  final double zoomSeconds;
+  final int keepHistoryCycles;
+  final double strokeWidth;
+  final Color strokeColor;
+  final bool showFill;
+  final Color? baseColor;
+  final double baseHue;
+  final double saturation;
+  final double lightness;
+  final double hueStep;
+  final int maxDepth;
+  final bool removingOld;
+  final bool zoomSpin;
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final side = math.min(size.width, size.height);
+    final center = Offset(size.width / 2, size.height / 2);
+    final outerRadius = side * 0.46;
+    final stepDeg = targetDeg / trianglesPerCycle;
+
+    final triangles = <List<Offset>>[
+      _equilateral(center: center, radius: outerRadius),
+    ];
+
+    void ensureTriangles(int minCount) {
+      while (triangles.length < minCount && triangles.length < maxDepth) {
+        final solved = _solveInnerTriangle(triangles.last, stepDeg);
+        if (solved == null || solved.scale >= 0.999999) break;
+        triangles.add(solved.vertices);
+      }
+    }
+
+    final nPerCycle = trianglesPerCycle;
+    ensureTriangles(nPerCycle + 3);
+
+    final removalSeconds = removingOld ? buildSeconds : 0.0;
+    final cycleLen = buildSeconds + removalSeconds + zoomSeconds;
+    final cycleIndex = (tSec / cycleLen).floor();
+    final local = tSec % cycleLen;
+    final inBuild = local < buildSeconds;
+    final inRemoval =
+        removingOld && !inBuild && local < buildSeconds + removalSeconds;
+    final p = inBuild
+        ? local / buildSeconds
+        : inRemoval
+        ? (local - buildSeconds) / removalSeconds
+        : (local - buildSeconds - removalSeconds) / zoomSeconds;
+
+    final neededDepth = (cycleIndex + 1) * nPerCycle + 3;
+    ensureTriangles(neededDepth);
+    final maxDepthIdx = triangles.length - 1;
+    final maxRenderableCycles = math.max(
+      1,
+      ((maxDepthIdx - nPerCycle) / nPerCycle).floor() + 1,
+    );
+    final effectiveCycleIndex = cycleIndex % maxRenderableCycles;
+    final baseDepth = effectiveCycleIndex * nPerCycle;
+
+    final startIdx = math.min(baseDepth, maxDepthIdx);
+    final endIdx = math.min(baseDepth + nPerCycle, maxDepthIdx);
+    final cameraStart = zoomSpin
+        ? _affineFromTriangles(triangles[startIdx], triangles[0])
+        : _scaleOnlyAffineFromTriangles(triangles[startIdx], triangles[0]);
+    final cameraEnd = zoomSpin
+        ? _affineFromTriangles(triangles[endIdx], triangles[0])
+        : _scaleOnlyAffineFromTriangles(triangles[endIdx], triangles[0]);
+    final camera = inBuild || inRemoval
+        ? cameraStart
+        : _mixAffine(cameraStart, cameraEnd, _easeInOut(p));
+
+    final clipPath = Path()
+      ..addOval(Rect.fromCircle(center: center, radius: outerRadius));
+    canvas.save();
+    canvas.clipPath(clipPath);
+
+    final currentTopDepth = inBuild
+        ? (baseDepth + p * nPerCycle)
+        : (baseDepth + nPerCycle.toDouble());
+    final fullTopDepth = math.min(maxDepthIdx, currentTopDepth.floor());
+    final partialAlpha = currentTopDepth - currentTopDepth.floor();
+    final historyStart = removingOld
+        ? baseDepth
+        : math.max(0, baseDepth - keepHistoryCycles * nPerCycle);
+
+    void drawAt(int triIdx, double alpha) {
+      _drawTriangle(
+        canvas,
+        triangles[triIdx]
+            .map((pt) => _applyAffine(camera, pt))
+            .toList(growable: false),
+        _triColor(triIdx),
+        alpha,
+      );
+    }
+
+    if (inRemoval) {
+      final removableCount = math.max(0, endIdx - historyStart);
+      final removalPosition = p * removableCount;
+      final firstRemaining = math.min(
+        endIdx,
+        historyStart + removalPosition.floor(),
+      );
+      final firstAlpha = 1 - (removalPosition - removalPosition.floor());
+
+      if (firstRemaining < endIdx && firstAlpha > 1e-6) {
+        drawAt(firstRemaining, firstAlpha);
+      }
+      for (
+        var triIdx = math.min(endIdx, firstRemaining + 1);
+        triIdx <= endIdx;
+        triIdx++
+      ) {
+        drawAt(triIdx, 1);
+      }
+    } else {
+      final drawStart = removingOld && !inBuild ? endIdx : historyStart;
+      for (var triIdx = drawStart; triIdx <= fullTopDepth; triIdx++) {
+        drawAt(triIdx, 1);
+      }
+
+      final partialIdx = fullTopDepth + 1;
+      if (partialIdx <= maxDepthIdx && partialAlpha > 1e-6) {
+        drawAt(partialIdx, partialAlpha);
+      }
+    }
+
+    canvas.restore();
+
+    final boundary = Paint()
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = strokeWidth
+      ..color = strokeColor;
+    canvas.drawCircle(center, outerRadius, boundary);
+  }
+
+  List<Offset> _equilateral({
+    required Offset center,
+    required double radius,
+    double rotationDeg = 0,
+  }) {
+    final points = <Offset>[];
+    final rot = rotationDeg * math.pi / 180;
+    for (var k = 0; k < 3; k++) {
+      final a = rot + (-math.pi / 2) + (k * 2 * math.pi / 3);
+      points.add(
+        Offset(
+          center.dx + radius * math.cos(a),
+          center.dy + radius * math.sin(a),
+        ),
+      );
+    }
+    return points;
+  }
+
+  _SolveResult? _solveInnerTriangle(
+    List<Offset> outerVertices,
+    double thetaDeg,
+  ) {
+    final th = thetaDeg * math.pi / 180;
+    final r00 = math.cos(th);
+    final r01 = -math.sin(th);
+    final r10 = math.sin(th);
+    final r11 = math.cos(th);
+
+    final a = List.generate(6, (_) => List<double>.filled(6, 0));
+    final b = List<double>.filled(6, 0);
+
+    for (var i = 0; i < 3; i++) {
+      final vi = outerVertices[i];
+      final vj = outerVertices[(i + 1) % 3];
+      final edgeX = vj.dx - vi.dx;
+      final edgeY = vj.dy - vi.dy;
+      final rviX = r00 * vi.dx + r01 * vi.dy;
+      final rviY = r10 * vi.dx + r11 * vi.dy;
+
+      final rowX = 2 * i;
+      final rowY = rowX + 1;
+
+      a[rowX][0] = rviX;
+      a[rowX][1] = 1;
+      a[rowX][3 + i] = -edgeX;
+      b[rowX] = vi.dx;
+
+      a[rowY][0] = rviY;
+      a[rowY][2] = 1;
+      a[rowY][3 + i] = -edgeY;
+      b[rowY] = vi.dy;
+    }
+
+    final x = _solveLinear6(a, b);
+    if (x == null) return null;
+
+    final scale = x[0];
+    final tx = x[1];
+    final ty = x[2];
+
+    final w = outerVertices
+        .map((p) {
+          final rx = r00 * p.dx + r01 * p.dy;
+          final ry = r10 * p.dx + r11 * p.dy;
+          return Offset(scale * rx + tx, scale * ry + ty);
+        })
+        .toList(growable: false);
+
+    return _SolveResult(vertices: w, scale: scale);
+  }
+
+  List<double>? _solveLinear6(List<List<double>> a, List<double> b) {
+    const n = 6;
+    final m = List.generate(n, (i) => [...a[i], b[i]]);
+
+    for (var col = 0; col < n; col++) {
+      var piv = col;
+      for (var r = col + 1; r < n; r++) {
+        if (m[r][col].abs() > m[piv][col].abs()) piv = r;
+      }
+      if (m[piv][col].abs() < 1e-12) return null;
+      if (piv != col) {
+        final tmp = m[col];
+        m[col] = m[piv];
+        m[piv] = tmp;
+      }
+
+      final pv = m[col][col];
+      for (var j = col; j <= n; j++) {
+        m[col][j] /= pv;
+      }
+
+      for (var r = 0; r < n; r++) {
+        if (r == col) continue;
+        final f = m[r][col];
+        if (f == 0) continue;
+        for (var j = col; j <= n; j++) {
+          m[r][j] -= f * m[col][j];
+        }
+      }
+    }
+
+    return List.generate(n, (i) => m[i][n]);
+  }
+
+  _Affine _affineFromTriangles(List<Offset> src, List<Offset> dst) {
+    final s0 = src[0], s1 = src[1], s2 = src[2];
+    final d0 = dst[0], d1 = dst[1], d2 = dst[2];
+
+    final a = <List<double>>[
+      [s0.dx, s0.dy, 1.0, 0.0, 0.0, 0.0],
+      [0.0, 0.0, 0.0, s0.dx, s0.dy, 1.0],
+      [s1.dx, s1.dy, 1.0, 0.0, 0.0, 0.0],
+      [0.0, 0.0, 0.0, s1.dx, s1.dy, 1.0],
+      [s2.dx, s2.dy, 1.0, 0.0, 0.0, 0.0],
+      [0.0, 0.0, 0.0, s2.dx, s2.dy, 1.0],
+    ];
+    final b = [d0.dx, d0.dy, d1.dx, d1.dy, d2.dx, d2.dy];
+
+    final x = _solveLinear6(a, b);
+    if (x == null) return const _Affine(a: 1, b: 0, c: 0, d: 1, tx: 0, ty: 0);
+
+    return _Affine(a: x[0], b: x[1], tx: x[2], c: x[3], d: x[4], ty: x[5]);
+  }
+
+  _Affine _mixAffine(_Affine a, _Affine b, double t) {
+    return _Affine(
+      a: a.a + (b.a - a.a) * t,
+      b: a.b + (b.b - a.b) * t,
+      c: a.c + (b.c - a.c) * t,
+      d: a.d + (b.d - a.d) * t,
+      tx: a.tx + (b.tx - a.tx) * t,
+      ty: a.ty + (b.ty - a.ty) * t,
+    );
+  }
+
+  _Affine _scaleOnlyAffineFromTriangles(List<Offset> src, List<Offset> dst) {
+    Offset centroid(List<Offset> points) {
+      return points.reduce((a, b) => a + b) / points.length.toDouble();
+    }
+
+    final srcCenter = centroid(src);
+    final dstCenter = centroid(dst);
+    final srcSide = (src[1] - src[0]).distance;
+    final dstSide = (dst[1] - dst[0]).distance;
+    final scale = dstSide / srcSide;
+
+    return _Affine(
+      a: scale,
+      b: 0,
+      c: 0,
+      d: scale,
+      tx: dstCenter.dx - scale * srcCenter.dx,
+      ty: dstCenter.dy - scale * srcCenter.dy,
+    );
+  }
+
+  Offset _applyAffine(_Affine t, Offset p) {
+    return Offset(
+      t.a * p.dx + t.b * p.dy + t.tx,
+      t.c * p.dx + t.d * p.dy + t.ty,
+    );
+  }
+
+  double _easeInOut(double t) {
+    if (t < 0.5) return 4 * t * t * t;
+    return 1 - math.pow(-2 * t + 2, 3) / 2;
+  }
+
+  Color _triColor(int index) {
+    final seedHsl = baseColor != null ? HSLColor.fromColor(baseColor!) : null;
+    final hue = ((seedHsl?.hue ?? baseHue) + index * hueStep) % 360;
+    final hsl = HSLColor.fromAHSL(1, hue, saturation, lightness);
+    return hsl.toColor();
+  }
+
+  void _drawTriangle(
+    Canvas canvas,
+    List<Offset> points,
+    Color fill,
+    double alpha,
+  ) {
+    final path = Path()
+      ..moveTo(points[0].dx, points[0].dy)
+      ..lineTo(points[1].dx, points[1].dy)
+      ..lineTo(points[2].dx, points[2].dy)
+      ..close();
+
+    final fillPaint = Paint()
+      ..style = PaintingStyle.fill
+      ..color = fill.withValues(alpha: alpha);
+
+    final strokePaint = Paint()
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = strokeWidth
+      ..color = strokeColor.withValues(alpha: alpha);
+
+    if (showFill) {
+      canvas.drawPath(path, fillPaint);
+    }
+    canvas.drawPath(path, strokePaint);
+  }
+
+  @override
+  bool shouldRepaint(covariant _TriangleLoadingPainter oldDelegate) => true;
+}
+
+class _SolveResult {
+  const _SolveResult({required this.vertices, required this.scale});
+
+  final List<Offset> vertices;
+  final double scale;
+}
+
+class _Affine {
+  const _Affine({
+    required this.a,
+    required this.b,
+    required this.c,
+    required this.d,
+    required this.tx,
+    required this.ty,
+  });
+
+  final double a;
+  final double b;
+  final double c;
+  final double d;
+  final double tx;
+  final double ty;
+}

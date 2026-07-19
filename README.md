@@ -32,10 +32,22 @@ flutter pub get
 ```dart
 import 'package:trainvent_general/trainvent_general.dart';
 
-void main() {
-  print(TrainventGeneral.packageName);
+class LoadingView extends StatelessWidget {
+  const LoadingView({super.key});
+
+  @override
+  Widget build(BuildContext context) {
+    return const Center(
+      child: TriangleLoadingIndicator(size: 64),
+    );
+  }
 }
 ```
+
+`TriangleLoadingIndicator` animates continuously by default. Its color follows
+the current theme's primary color; use `baseColor` to override it. You can also
+provide an `Animation<double>` through `progress` when another controller should
+drive the indicator.
 
 ## Development
 
