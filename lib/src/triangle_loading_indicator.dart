@@ -18,6 +18,7 @@ class TriangleLoadingIndicator extends StatefulWidget {
     this.keepHistoryCycles = 2,
     this.strokeWidth = 2.2,
     this.strokeColor = const Color(0xFF111111),
+    this.background = Colors.white,
     this.showFill = true,
     this.baseColor,
     this.baseHue = 26,
@@ -28,6 +29,7 @@ class TriangleLoadingIndicator extends StatefulWidget {
     this.progress,
     this.iterations,
     this.removingOld = true,
+    this.oneByOne = true,
     this.zoomSpin = false,
   }) : assert(iterations == null || iterations > 0);
 
@@ -39,6 +41,10 @@ class TriangleLoadingIndicator extends StatefulWidget {
   final int keepHistoryCycles;
   final double strokeWidth;
   final Color strokeColor;
+
+  /// Color shown inside the circle behind the triangles.
+  final Color background;
+
   final bool showFill;
   final Color? baseColor;
   final double baseHue;
@@ -61,6 +67,13 @@ class TriangleLoadingIndicator extends StatefulWidget {
   /// Removes the surrounding triangles, largest first, before each zoom.
   final bool removingOld;
 
+  /// Advances the full nested set by one triangle during each cycle.
+  ///
+  /// When true, the current outer triangle is removed, a new innermost
+  /// triangle is added, and the remaining set is zoomed outward. This removal
+  /// happens regardless of [removingOld].
+  final bool oneByOne;
+
   /// Rotates the camera during each zoom so the active triangle stays upright.
   /// When false, the camera zooms straight and triangle orientation alternates.
   final bool zoomSpin;
@@ -73,6 +86,20 @@ class TriangleLoadingIndicator extends StatefulWidget {
 class _TriangleLoadingIndicatorState extends State<TriangleLoadingIndicator>
     with SingleTickerProviderStateMixin {
   late final AnimationController _controller;
+
+  Duration get _cycleDuration {
+    final duration =
+        widget.buildDuration +
+        widget.zoomDuration +
+        (widget.removingOld || widget.oneByOne
+            ? widget.buildDuration
+            : Duration.zero);
+    if (!widget.oneByOne) return duration;
+
+    return Duration(
+      microseconds: duration.inMicroseconds ~/ widget.trianglesPerCycle,
+    );
+  }
 
   @override
   void initState() {
@@ -88,7 +115,8 @@ class _TriangleLoadingIndicatorState extends State<TriangleLoadingIndicator>
         oldWidget.iterations != widget.iterations ||
         oldWidget.buildDuration != widget.buildDuration ||
         oldWidget.zoomDuration != widget.zoomDuration ||
-        oldWidget.removingOld != widget.removingOld) {
+        oldWidget.removingOld != widget.removingOld ||
+        oldWidget.oneByOne != widget.oneByOne) {
       _syncAutoplay();
     }
   }
@@ -96,14 +124,10 @@ class _TriangleLoadingIndicatorState extends State<TriangleLoadingIndicator>
   void _syncAutoplay() {
     _controller.stop();
     if (widget.progress == null) {
-      final cycleDuration =
-          widget.buildDuration +
-          widget.zoomDuration +
-          (widget.removingOld ? widget.buildDuration : Duration.zero);
       if (widget.iterations == null) {
-        _controller.repeat(period: cycleDuration);
+        _controller.repeat(period: _cycleDuration);
       } else {
-        _controller.duration = cycleDuration * widget.iterations!;
+        _controller.duration = _cycleDuration * widget.iterations!;
         _controller.forward(from: 0);
       }
     }
@@ -118,12 +142,8 @@ class _TriangleLoadingIndicatorState extends State<TriangleLoadingIndicator>
   @override
   Widget build(BuildContext context) {
     final animation = widget.progress ?? _controller;
-    final cycleDuration =
-        widget.buildDuration +
-        widget.zoomDuration +
-        (widget.removingOld ? widget.buildDuration : Duration.zero);
     final cycleSeconds =
-        cycleDuration.inMicroseconds / Duration.microsecondsPerSecond;
+        _cycleDuration.inMicroseconds / Duration.microsecondsPerSecond;
 
     return SizedBox(
       width: widget.size,
@@ -150,6 +170,7 @@ class _TriangleLoadingIndicatorState extends State<TriangleLoadingIndicator>
                 keepHistoryCycles: widget.keepHistoryCycles,
                 strokeWidth: widget.strokeWidth,
                 strokeColor: widget.strokeColor,
+                background: widget.background,
                 showFill: widget.showFill,
                 baseColor:
                     widget.baseColor ?? Theme.of(context).colorScheme.primary,
@@ -159,6 +180,7 @@ class _TriangleLoadingIndicatorState extends State<TriangleLoadingIndicator>
                 hueStep: widget.hueStep,
                 maxDepth: widget.maxDepth,
                 removingOld: widget.removingOld,
+                oneByOne: widget.oneByOne,
                 zoomSpin: widget.zoomSpin,
               ),
             );
@@ -179,6 +201,7 @@ class _TriangleLoadingPainter extends CustomPainter {
     required this.keepHistoryCycles,
     required this.strokeWidth,
     required this.strokeColor,
+    required this.background,
     required this.showFill,
     required this.baseColor,
     required this.baseHue,
@@ -187,6 +210,7 @@ class _TriangleLoadingPainter extends CustomPainter {
     required this.hueStep,
     required this.maxDepth,
     required this.removingOld,
+    required this.oneByOne,
     required this.zoomSpin,
   });
 
@@ -198,6 +222,7 @@ class _TriangleLoadingPainter extends CustomPainter {
   final int keepHistoryCycles;
   final double strokeWidth;
   final Color strokeColor;
+  final Color background;
   final bool showFill;
   final Color? baseColor;
   final double baseHue;
@@ -206,6 +231,7 @@ class _TriangleLoadingPainter extends CustomPainter {
   final double hueStep;
   final int maxDepth;
   final bool removingOld;
+  final bool oneByOne;
   final bool zoomSpin;
 
   @override
@@ -227,29 +253,45 @@ class _TriangleLoadingPainter extends CustomPainter {
       }
     }
 
-    final nPerCycle = trianglesPerCycle;
+    final nPerCycle = oneByOne ? 1 : trianglesPerCycle;
     ensureTriangles(nPerCycle + 3);
 
-    final removalSeconds = removingOld ? buildSeconds : 0.0;
-    final cycleLen = buildSeconds + removalSeconds + zoomSeconds;
+    final speedDivisor = oneByOne ? trianglesPerCycle : 1;
+    final phaseBuildSeconds = buildSeconds / speedDivisor;
+    final phaseZoomSeconds = zoomSeconds / speedDivisor;
+    final removalSeconds = removingOld || oneByOne ? phaseBuildSeconds : 0.0;
+    final cycleLen = phaseBuildSeconds + removalSeconds + phaseZoomSeconds;
     final cycleIndex = (tSec / cycleLen).floor();
     final local = tSec % cycleLen;
-    final inBuild = local < buildSeconds;
-    final inRemoval =
-        removingOld && !inBuild && local < buildSeconds + removalSeconds;
-    final p = inBuild
-        ? local / buildSeconds
+    final inRemoval = oneByOne
+        ? local < removalSeconds
+        : removingOld &&
+              local >= phaseBuildSeconds &&
+              local < phaseBuildSeconds + removalSeconds;
+    final inBuild = oneByOne
+        ? !inRemoval && local < removalSeconds + phaseBuildSeconds
+        : local < phaseBuildSeconds;
+    final p = oneByOne
+        ? inRemoval
+              ? local / removalSeconds
+              : inBuild
+              ? (local - removalSeconds) / phaseBuildSeconds
+              : (local - removalSeconds - phaseBuildSeconds) / phaseZoomSeconds
+        : inBuild
+        ? local / phaseBuildSeconds
         : inRemoval
-        ? (local - buildSeconds) / removalSeconds
-        : (local - buildSeconds - removalSeconds) / zoomSeconds;
+        ? (local - phaseBuildSeconds) / removalSeconds
+        : (local - phaseBuildSeconds - removalSeconds) / phaseZoomSeconds;
 
-    final neededDepth = (cycleIndex + 1) * nPerCycle + 3;
+    final oneByOneWindowSize = trianglesPerCycle + 1;
+    final neededDepth = oneByOne
+        ? cycleIndex + oneByOneWindowSize + 1
+        : (cycleIndex + 1) * nPerCycle + 3;
     ensureTriangles(neededDepth);
     final maxDepthIdx = triangles.length - 1;
-    final maxRenderableCycles = math.max(
-      1,
-      ((maxDepthIdx - nPerCycle) / nPerCycle).floor() + 1,
-    );
+    final maxRenderableCycles = oneByOne
+        ? math.max(1, maxDepthIdx - oneByOneWindowSize + 1)
+        : math.max(1, ((maxDepthIdx - nPerCycle) / nPerCycle).floor() + 1);
     final effectiveCycleIndex = cycleIndex % maxRenderableCycles;
     final baseDepth = effectiveCycleIndex * nPerCycle;
 
@@ -269,6 +311,13 @@ class _TriangleLoadingPainter extends CustomPainter {
       ..addOval(Rect.fromCircle(center: center, radius: outerRadius));
     canvas.save();
     canvas.clipPath(clipPath);
+    canvas.drawCircle(
+      center,
+      outerRadius,
+      Paint()
+        ..style = PaintingStyle.fill
+        ..color = background,
+    );
 
     final currentTopDepth = inBuild
         ? (baseDepth + p * nPerCycle)
@@ -290,7 +339,30 @@ class _TriangleLoadingPainter extends CustomPainter {
       );
     }
 
-    if (inRemoval) {
+    if (oneByOne) {
+      final firstInnerIdx = math.min(startIdx + 1, maxDepthIdx);
+      final previousLastIdx = math.min(
+        baseDepth + oneByOneWindowSize - 1,
+        maxDepthIdx,
+      );
+      final newLastIdx = math.min(baseDepth + oneByOneWindowSize, maxDepthIdx);
+
+      if (inRemoval) {
+        drawAt(startIdx, 1 - p);
+        for (var triIdx = firstInnerIdx; triIdx <= previousLastIdx; triIdx++) {
+          drawAt(triIdx, 1);
+        }
+      } else if (inBuild) {
+        for (var triIdx = firstInnerIdx; triIdx <= previousLastIdx; triIdx++) {
+          drawAt(triIdx, 1);
+        }
+        drawAt(newLastIdx, p);
+      } else {
+        for (var triIdx = firstInnerIdx; triIdx <= newLastIdx; triIdx++) {
+          drawAt(triIdx, 1);
+        }
+      }
+    } else if (inRemoval) {
       final removableCount = math.max(0, endIdx - historyStart);
       final removalPosition = p * removableCount;
       final firstRemaining = math.min(
