@@ -18,8 +18,8 @@ class TriangleLoadingIndicator extends StatefulWidget {
     this.keepHistoryCycles = 2,
     this.strokeWidth = 2.2,
     this.strokeColor = const Color(0xFF111111),
-    this.background = Colors.white,
-    this.showFill = true,
+    this.background = Colors.transparent,
+    this.showFill = false,
     this.baseColor,
     this.baseHue = 26,
     this.saturation = 0.73,
@@ -29,7 +29,7 @@ class TriangleLoadingIndicator extends StatefulWidget {
     this.progress,
     this.iterations,
     this.removingOld = true,
-    this.oneByOne = true,
+    this.oneByOne = false,
     this.zoomSpin = false,
   }) : assert(iterations == null || iterations > 0);
 
@@ -60,8 +60,8 @@ class TriangleLoadingIndicator extends StatefulWidget {
   /// Number of cycles to play, or null to animate endlessly.
   ///
   /// When [progress] is supplied, a non-null value is the number of complete
-  /// cycles represented by that animation. A null value represents one cycle;
-  /// the owner of [progress] controls whether that cycle repeats.
+  /// cycles represented by that animation. A null value represents one full
+  /// seamless visual loop; the owner of [progress] controls whether it repeats.
   final int? iterations;
 
   /// Removes the surrounding triangles, largest first, before each zoom.
@@ -77,6 +77,28 @@ class TriangleLoadingIndicator extends StatefulWidget {
   /// Rotates the camera during each zoom so the active triangle stays upright.
   /// When false, the camera zooms straight and triangle orientation alternates.
   final bool zoomSpin;
+
+  /// Number of animation cycles required for the geometry and hues to return
+  /// to their starting state.
+  int get loopIterations {
+    final depthStep = oneByOne ? 1 : trianglesPerCycle;
+    final maxCycles = math.max(1, maxDepth ~/ depthStep);
+    final rotationStep = targetDeg / trianglesPerCycle;
+
+    bool isFullTurn(double angle) {
+      final remainder = angle.abs() % 360;
+      return remainder < 1e-7 || (360 - remainder) < 1e-7;
+    }
+
+    for (var cycles = 1; cycles <= maxCycles; cycles++) {
+      final depth = cycles * depthStep;
+      if (isFullTurn(depth * rotationStep) && isFullTurn(depth * hueStep)) {
+        return cycles;
+      }
+    }
+
+    return maxCycles;
+  }
 
   @override
   State<TriangleLoadingIndicator> createState() =>
@@ -115,6 +137,10 @@ class _TriangleLoadingIndicatorState extends State<TriangleLoadingIndicator>
         oldWidget.iterations != widget.iterations ||
         oldWidget.buildDuration != widget.buildDuration ||
         oldWidget.zoomDuration != widget.zoomDuration ||
+        oldWidget.targetDeg != widget.targetDeg ||
+        oldWidget.trianglesPerCycle != widget.trianglesPerCycle ||
+        oldWidget.hueStep != widget.hueStep ||
+        oldWidget.maxDepth != widget.maxDepth ||
         oldWidget.removingOld != widget.removingOld ||
         oldWidget.oneByOne != widget.oneByOne) {
       _syncAutoplay();
@@ -125,7 +151,7 @@ class _TriangleLoadingIndicatorState extends State<TriangleLoadingIndicator>
     _controller.stop();
     if (widget.progress == null) {
       if (widget.iterations == null) {
-        _controller.repeat(period: _cycleDuration);
+        _controller.repeat(period: _cycleDuration * widget.loopIterations);
       } else {
         _controller.duration = _cycleDuration * widget.iterations!;
         _controller.forward(from: 0);
@@ -155,7 +181,7 @@ class _TriangleLoadingIndicatorState extends State<TriangleLoadingIndicator>
             final tSec =
                 animation.value.clamp(0.0, 1.0) *
                 cycleSeconds *
-                (widget.iterations ?? 1);
+                (widget.iterations ?? widget.loopIterations);
             return CustomPaint(
               painter: _TriangleLoadingPainter(
                 tSec: tSec,
