@@ -7,3 +7,8 @@
 ## 0.0.2
 
 * added one by one iteration as the new default
+
+## 0.0.3
+
+* fixed broken endless animation
+* changed the default values to most pleasing and minimalistic
