@@ -12,3 +12,7 @@
 
 * fixed broken endless animation
 * changed the default values to most pleasing and minimalistic
+
+## 0.0.4
+
+* added `iterationDuration`

@@ -13,8 +13,8 @@ class TriangleLoadingIndicator extends StatefulWidget {
     this.size = 48,
     this.targetDeg = 60,
     this.trianglesPerCycle = 6,
-    this.buildDuration = const Duration(milliseconds: 1300),
-    this.zoomDuration = const Duration(milliseconds: 800),
+    this.iterationDuration = const Duration(milliseconds: 3400),
+    this.buildToZoomTimeRatio = 1.625,
     this.keepHistoryCycles = 2,
     this.strokeWidth = 2.2,
     this.strokeColor = const Color(0xFF111111),
@@ -31,13 +31,21 @@ class TriangleLoadingIndicator extends StatefulWidget {
     this.removingOld = true,
     this.oneByOne = false,
     this.zoomSpin = false,
-  }) : assert(iterations == null || iterations > 0);
+  }) : assert(iterations == null || iterations > 0),
+       assert(buildToZoomTimeRatio > 0);
 
   final double size;
   final double targetDeg;
   final int trianglesPerCycle;
-  final Duration buildDuration;
-  final Duration zoomDuration;
+
+  /// Total time for one iteration.
+  final Duration iterationDuration;
+
+  /// Ratio of the time spent building to the time spent zooming.
+  ///
+  /// A value of 2 makes each build or removal phase take twice as long as the
+  /// zoom phase. The default of 1.625 preserves the original 1300:800 timing.
+  final double buildToZoomTimeRatio;
   final int keepHistoryCycles;
   final double strokeWidth;
   final Color strokeColor;
@@ -109,20 +117,6 @@ class _TriangleLoadingIndicatorState extends State<TriangleLoadingIndicator>
     with SingleTickerProviderStateMixin {
   late final AnimationController _controller;
 
-  Duration get _cycleDuration {
-    final duration =
-        widget.buildDuration +
-        widget.zoomDuration +
-        (widget.removingOld || widget.oneByOne
-            ? widget.buildDuration
-            : Duration.zero);
-    if (!widget.oneByOne) return duration;
-
-    return Duration(
-      microseconds: duration.inMicroseconds ~/ widget.trianglesPerCycle,
-    );
-  }
-
   @override
   void initState() {
     super.initState();
@@ -135,8 +129,8 @@ class _TriangleLoadingIndicatorState extends State<TriangleLoadingIndicator>
     super.didUpdateWidget(oldWidget);
     if (oldWidget.progress != widget.progress ||
         oldWidget.iterations != widget.iterations ||
-        oldWidget.buildDuration != widget.buildDuration ||
-        oldWidget.zoomDuration != widget.zoomDuration ||
+        oldWidget.iterationDuration != widget.iterationDuration ||
+        oldWidget.buildToZoomTimeRatio != widget.buildToZoomTimeRatio ||
         oldWidget.targetDeg != widget.targetDeg ||
         oldWidget.trianglesPerCycle != widget.trianglesPerCycle ||
         oldWidget.hueStep != widget.hueStep ||
@@ -148,12 +142,18 @@ class _TriangleLoadingIndicatorState extends State<TriangleLoadingIndicator>
   }
 
   void _syncAutoplay() {
+    assert(
+      widget.iterationDuration.inMicroseconds > 0,
+      'iterationDuration must be greater than zero.',
+    );
     _controller.stop();
     if (widget.progress == null) {
       if (widget.iterations == null) {
-        _controller.repeat(period: _cycleDuration * widget.loopIterations);
+        _controller.repeat(
+          period: widget.iterationDuration * widget.loopIterations,
+        );
       } else {
-        _controller.duration = _cycleDuration * widget.iterations!;
+        _controller.duration = widget.iterationDuration * widget.iterations!;
         _controller.forward(from: 0);
       }
     }
@@ -169,7 +169,12 @@ class _TriangleLoadingIndicatorState extends State<TriangleLoadingIndicator>
   Widget build(BuildContext context) {
     final animation = widget.progress ?? _controller;
     final cycleSeconds =
-        _cycleDuration.inMicroseconds / Duration.microsecondsPerSecond;
+        widget.iterationDuration.inMicroseconds /
+        Duration.microsecondsPerSecond;
+    final buildPhaseCount = widget.removingOld || widget.oneByOne ? 2 : 1;
+    final zoomSeconds =
+        cycleSeconds / (1 + buildPhaseCount * widget.buildToZoomTimeRatio);
+    final buildSeconds = zoomSeconds * widget.buildToZoomTimeRatio;
 
     return SizedBox(
       width: widget.size,
@@ -187,12 +192,8 @@ class _TriangleLoadingIndicatorState extends State<TriangleLoadingIndicator>
                 tSec: tSec,
                 targetDeg: widget.targetDeg,
                 trianglesPerCycle: widget.trianglesPerCycle,
-                buildSeconds:
-                    widget.buildDuration.inMicroseconds /
-                    Duration.microsecondsPerSecond,
-                zoomSeconds:
-                    widget.zoomDuration.inMicroseconds /
-                    Duration.microsecondsPerSecond,
+                buildSeconds: buildSeconds,
+                zoomSeconds: zoomSeconds,
                 keepHistoryCycles: widget.keepHistoryCycles,
                 strokeWidth: widget.strokeWidth,
                 strokeColor: widget.strokeColor,
@@ -282,9 +283,8 @@ class _TriangleLoadingPainter extends CustomPainter {
     final nPerCycle = oneByOne ? 1 : trianglesPerCycle;
     ensureTriangles(nPerCycle + 3);
 
-    final speedDivisor = oneByOne ? trianglesPerCycle : 1;
-    final phaseBuildSeconds = buildSeconds / speedDivisor;
-    final phaseZoomSeconds = zoomSeconds / speedDivisor;
+    final phaseBuildSeconds = buildSeconds;
+    final phaseZoomSeconds = zoomSeconds;
     final removalSeconds = removingOld || oneByOne ? phaseBuildSeconds : 0.0;
     final cycleLen = phaseBuildSeconds + removalSeconds + phaseZoomSeconds;
     final cycleIndex = (tSec / cycleLen).floor();
