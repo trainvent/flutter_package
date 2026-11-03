@@ -32,3 +32,6 @@ migrate_working_dir/
 
 # Keep the runnable gallery in Git, outside the published package.
 /example/
+
+# Package tests remain in Git, outside the published archive.
+/test/
