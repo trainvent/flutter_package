@@ -1,6 +1,6 @@
 name: trainvent_general
 description: "Shared general-purpose utilities and widgets for Trainvent Flutter projects."
-version: 0.0.4
+version: 0.0.5
 repository: https://github.com/trainvent/flutter_package
 
 environment:
