@@ -4,7 +4,7 @@ import 'package:trainvent_general/trainvent_general.dart';
 import 'package:trainvent_general_example/screens/triangle_loading_indicator_screen.dart';
 
 void main() {
-  testWidgets('Trace and No-end are variants within the Fuze category', (
+  testWidgets('Fuze and Continuous are variants within the Trace category', (
     tester,
   ) async {
     await tester.binding.setSurfaceSize(const Size(1200, 1000));
@@ -12,26 +12,33 @@ void main() {
     await tester.pumpWidget(
       const MaterialApp(home: TriangleLoadingIndicatorScreen()),
     );
-    expect(find.text('No-end'), findsNothing);
+    expect(find.text('Continuous'), findsNothing);
     await tester.tap(
       find.byType(DropdownButtonFormField<TriangleLoadingIndicatorMode>),
     );
     await tester.pump(const Duration(milliseconds: 300));
-    await tester.tap(find.text('Fuze').last);
+    await tester.tap(find.text('Trace').last);
     await tester.pump(const Duration(milliseconds: 300));
-    expect(find.text('Trace'), findsOneWidget);
-    expect(find.text('No-end'), findsOneWidget);
+    expect(find.text('Fuze'), findsOneWidget);
+    expect(find.text('Continuous'), findsOneWidget);
     expect(find.text('Zoom spin'), findsNothing);
     TriangleLoadingIndicator preview() =>
         tester.widget<TriangleLoadingIndicator>(
           find.byKey(const ValueKey('triangle-playground-preview')),
         );
-    expect(preview().mode, TriangleLoadingIndicatorMode.fuze);
-    expect(preview().fuzeStyle, FuzeStyle.trace);
-    await tester.tap(find.text('No-end'));
+    expect(preview().mode, TriangleLoadingIndicatorMode.trace);
+    expect(preview().traceStyle, TraceStyle.fuze);
+    await tester.tap(find.text('Continuous'));
     await tester.pump();
-    expect(preview().mode, TriangleLoadingIndicatorMode.fuze);
-    expect(preview().fuzeStyle, FuzeStyle.noEnd);
+    expect(preview().mode, TriangleLoadingIndicatorMode.trace);
+    expect(preview().traceStyle, TraceStyle.continuous);
+    expect(preview().showArrow, isTrue);
+    await tester.tap(find.byKey(const ValueKey('continuous-arrow-switch')));
+    await tester.pump();
+    expect(preview().showArrow, isFalse);
+    await tester.tap(find.byKey(const ValueKey('continuous-arrow-switch')));
+    await tester.pump();
+    expect(preview().showArrow, isTrue);
     expect(preview().iterationDuration, const Duration(milliseconds: 1800));
     final categoryFinder = find.byType(
       DropdownButtonFormField<TriangleLoadingIndicatorMode>,
@@ -54,12 +61,12 @@ void main() {
       expect(
         tester.widget<CustomPaint>(previewPaintFinder).painter,
         same(initialPainter),
-        reason: 'Fuze must repaint without rebuilding',
+        reason: 'Trace must repaint without rebuilding',
       );
     }
     stopwatch.stop();
     debugPrint(
-      'No-end: 120 frames in ${stopwatch.elapsedMilliseconds} ms; '
+      'Continuous: 120 frames in ${stopwatch.elapsedMilliseconds} ms; '
       '$categoryRebuilds category rebuilds',
     );
     expect(
@@ -80,8 +87,8 @@ void main() {
     await tester.pump(const Duration(milliseconds: 16));
     await tester.tap(find.byTooltip('Reset to defaults'));
     await tester.pump();
-    expect(preview().mode, TriangleLoadingIndicatorMode.standard);
-    expect(find.text('No-end'), findsNothing);
+    expect(preview().mode, TriangleLoadingIndicatorMode.place);
+    expect(find.text('Continuous'), findsNothing);
     expect(find.text('Zoom spin'), findsOneWidget);
     expect(find.byKey(const ValueKey('iteration-count-field')), findsOneWidget);
     await tester.tap(find.text('Color'));

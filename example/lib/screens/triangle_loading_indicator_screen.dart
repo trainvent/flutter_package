@@ -23,11 +23,12 @@ class _TriangleLoadingIndicatorScreenState
   String? _iterationCountError;
   bool _showColor = _defaults.showFill;
   bool _zoomSpin = _defaults.zoomSpin;
+  bool _showArrow = _defaults.showArrow;
   TriangleLoadingIndicatorMode _mode = _defaults.mode;
-  FuzeStyle _fuzeStyle = _defaults.fuzeStyle;
+  TraceStyle _traceStyle = _defaults.traceStyle;
 
-  bool get _fuze => _mode == TriangleLoadingIndicatorMode.fuze;
-  bool get _noEnd => _fuze && _fuzeStyle == FuzeStyle.noEnd;
+  bool get _trace => _mode == TriangleLoadingIndicatorMode.trace;
+  bool get _continuous => _trace && _traceStyle == TraceStyle.continuous;
   bool _removingOld = _defaults.removingOld;
   bool _oneByOne = _defaults.oneByOne;
   bool _resumeAfterScrub = false;
@@ -37,8 +38,9 @@ class _TriangleLoadingIndicatorScreenState
   bool get _isDefault =>
       _showColor == _defaults.showFill &&
       _zoomSpin == _defaults.zoomSpin &&
+      _showArrow == _defaults.showArrow &&
       _mode == _defaults.mode &&
-      _fuzeStyle == _defaults.fuzeStyle &&
+      _traceStyle == _defaults.traceStyle &&
       _removingOld == _defaults.removingOld &&
       _oneByOne == _defaults.oneByOne &&
       _iterations == _defaults.iterations &&
@@ -46,7 +48,7 @@ class _TriangleLoadingIndicatorScreenState
 
   int get _seamlessLoopIterations => TriangleLoadingIndicator(
     mode: _mode,
-    fuzeStyle: _fuzeStyle,
+    traceStyle: _traceStyle,
     showFill: _showColor,
     oneByOne: _oneByOne,
     zoomSpin: _zoomSpin,
@@ -108,8 +110,9 @@ class _TriangleLoadingIndicatorScreenState
     setState(() {
       _showColor = _defaults.showFill;
       _zoomSpin = _defaults.zoomSpin;
+      _showArrow = _defaults.showArrow;
       _mode = _defaults.mode;
-      _fuzeStyle = _defaults.fuzeStyle;
+      _traceStyle = _defaults.traceStyle;
       _removingOld = _defaults.removingOld;
       _oneByOne = _defaults.oneByOne;
       _iterations = _defaults.iterations;
@@ -123,16 +126,16 @@ class _TriangleLoadingIndicatorScreenState
     });
   }
 
-  void _setAnimation(TriangleLoadingIndicatorMode mode, FuzeStyle style) {
+  void _setAnimation(TriangleLoadingIndicatorMode mode, TraceStyle style) {
     setState(() {
       _mode = mode;
-      _fuzeStyle = style;
+      _traceStyle = style;
       _iterations = null;
       _iterationCountController.clear();
       _iterationCountError = null;
       _iterationDuration = TriangleLoadingIndicator(
         mode: mode,
-        fuzeStyle: style,
+        traceStyle: style,
       ).iterationDuration;
       _iterationDurationController.text = _iterationDuration.inMilliseconds
           .toString();
@@ -222,7 +225,8 @@ class _TriangleLoadingIndicatorScreenState
                           oneByOne: _oneByOne,
                           zoomSpin: _zoomSpin,
                           mode: _mode,
-                          fuzeStyle: _fuzeStyle,
+                          traceStyle: _traceStyle,
+                          showArrow: _showArrow,
                         ),
                       ),
                     ),
@@ -235,42 +239,50 @@ class _TriangleLoadingIndicatorScreenState
               child: DropdownButtonFormField<TriangleLoadingIndicatorMode>(
                 key: ValueKey(_mode),
                 initialValue: _mode,
-                decoration: const InputDecoration(labelText: 'Category'),
+                decoration: const InputDecoration(labelText: 'Type'),
                 items: const [
                   DropdownMenuItem(
-                    value: TriangleLoadingIndicatorMode.standard,
-                    child: Text('Standard'),
+                    value: TriangleLoadingIndicatorMode.place,
+                    child: Text('Place'),
                   ),
                   DropdownMenuItem(
-                    value: TriangleLoadingIndicatorMode.fuze,
-                    child: Text('Fuze'),
+                    value: TriangleLoadingIndicatorMode.trace,
+                    child: Text('Trace'),
                   ),
                 ],
                 onChanged: (value) {
-                  if (value != null) _setAnimation(value, _fuzeStyle);
+                  if (value != null) _setAnimation(value, _traceStyle);
                 },
               ),
             ),
-            if (_fuze)
+            if (_trace)
               Padding(
                 padding: const EdgeInsets.symmetric(
                   horizontal: 24,
                   vertical: 8,
                 ),
-                child: SegmentedButton<FuzeStyle>(
+                child: SegmentedButton<TraceStyle>(
                   segments: const [
-                    ButtonSegment(value: FuzeStyle.trace, label: Text('Trace')),
+                    ButtonSegment(value: TraceStyle.fuze, label: Text('Fuze')),
                     ButtonSegment(
-                      value: FuzeStyle.noEnd,
-                      label: Text('No-end'),
+                      value: TraceStyle.continuous,
+                      label: Text('Continuous'),
                     ),
                   ],
-                  selected: {_fuzeStyle},
+                  selected: {_traceStyle},
                   onSelectionChanged: (selection) =>
                       _setAnimation(_mode, selection.single),
                 ),
               ),
-            if (!_fuze)
+            if (_trace && _continuous)
+              SwitchListTile.adaptive(
+                key: const ValueKey('continuous-arrow-switch'),
+                contentPadding: const EdgeInsets.symmetric(horizontal: 24),
+                title: const Text('Arrow'),
+                value: _showArrow,
+                onChanged: (value) => setState(() => _showArrow = value),
+              ),
+            if (!_trace)
               SwitchListTile.adaptive(
                 contentPadding: const EdgeInsets.fromLTRB(24, 8, 24, 0),
                 title: const Text('Zoom spin'),
@@ -287,7 +299,7 @@ class _TriangleLoadingIndicatorScreenState
                   });
                 },
               ),
-            if (!_fuze)
+            if (!_trace)
               SwitchListTile.adaptive(
                 contentPadding: const EdgeInsets.symmetric(horizontal: 24),
                 title: const Text('Remove old triangles'),
@@ -302,7 +314,7 @@ class _TriangleLoadingIndicatorScreenState
                   });
                 },
               ),
-            if (!_fuze)
+            if (!_trace)
               SwitchListTile.adaptive(
                 contentPadding: const EdgeInsets.fromLTRB(24, 0, 24, 8),
                 title: const Text('One by one'),
@@ -317,7 +329,7 @@ class _TriangleLoadingIndicatorScreenState
                   });
                 },
               ),
-            if (!_noEnd)
+            if (!_continuous)
               Padding(
                 padding: const EdgeInsets.symmetric(horizontal: 24),
                 child: SegmentedButton<bool>(

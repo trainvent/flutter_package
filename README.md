@@ -50,26 +50,27 @@ the current theme's primary color; use `baseColor` to override it. You can also
 provide an `Animation<double>` through `progress` when another controller should
 drive the indicator.
 
-Standard uses the original forward hue progression. With fills enabled, the
+Place uses the original forward hue progression. With fills enabled, the
 7° step per triangle repeats after 60 iterations (204 seconds, seven hue turns).
 Outline-only mode repeats after two iterations. Triangle paths remain cached,
 and animation frames repaint without rebuilding widgets. The loop length is
 calculated from the geometry and hue step; for example, 7.5° needs eight iterations.
 
-The indicator has two animation categories: `TriangleLoadingIndicatorMode.standard`
-and `TriangleLoadingIndicatorMode.fuze`. Fuze shares one circle-and-triangle route
+The indicator has two animation categories: `TriangleLoadingIndicatorMode.place`
+and `TriangleLoadingIndicatorMode.trace`. Trace shares one circle-and-triangle route
 with two playback styles:
 
 ```dart
 const TriangleLoadingIndicator(
-  mode: TriangleLoadingIndicatorMode.fuze,
-  fuzeStyle: FuzeStyle.trace, // Or FuzeStyle.noEnd.
+  mode: TriangleLoadingIndicatorMode.trace,
+  traceStyle: TraceStyle.fuze, // Or TraceStyle.continuous.
 )
 ```
 
-`trace` starts with the complete outline and burns it away behind a glowing ember. `noEnd` loops a moving arrow over a
+`fuze` starts with the complete outline and burns it away behind a glowing ember. `continuous` loops a moving arrow over a
 faint guide, using `baseColor` or the theme primary color and a default 1.8-second
-iteration. Select the category and Fuze style separately in the example app.
+iteration. Set `showArrow: false` to hide the Continuous arrowhead. Select the
+type and Trace style separately in the example app.
 
 ## Development
 

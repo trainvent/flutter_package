@@ -1,3 +1,10 @@
+## 0.0.6
+
+* Rename the animation types to Place (the default) and Trace.
+* Rename Trace's styles to Fuze and Continuous, exposed through `traceStyle` and `TraceStyle`.
+* Add `showArrow` to toggle the Continuous arrowhead, with an Arrow switch in the example.
+* Update the API documentation and regression tests for the renamed types and optional arrow.
+
 ## 0.0.5
 
 * Add the Fuze animation category with Trace (burn-away) and No-end (looping arrow) styles sharing the same circle-and-triangle route.

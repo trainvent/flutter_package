@@ -5,9 +5,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:trainvent_general/trainvent_general.dart';
 
 void main() {
-  testWidgets('standard reuses cached paths throughout the loop', (
-    tester,
-  ) async {
+  testWidgets('place reuses cached paths throughout the loop', (tester) async {
     for (final progress in [0.01, 0.95]) {
       await tester.pumpWidget(
         MaterialApp(
@@ -39,7 +37,7 @@ void main() {
       }
 
       debugPrint(
-        'Standard progress $progress: 120 paints in ${stopwatch.elapsedMicroseconds} us',
+        'Place progress $progress: 120 paints in ${stopwatch.elapsedMicroseconds} us',
       );
     }
   });
@@ -134,7 +132,7 @@ void main() {
     },
   );
 
-  testWidgets('standard animation repaints without rebuilding widgets', (
+  testWidgets('place animation repaints without rebuilding widgets', (
     tester,
   ) async {
     final animation = AnimationController(vsync: tester);

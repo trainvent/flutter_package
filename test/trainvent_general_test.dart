@@ -8,6 +8,17 @@ void main() {
     expect(TrainventGeneral.packageName, 'trainvent_general');
   });
 
+  test('Place is the first and default type', () {
+    expect(
+      TriangleLoadingIndicatorMode.values.first,
+      TriangleLoadingIndicatorMode.place,
+    );
+    expect(
+      const TriangleLoadingIndicator().mode,
+      TriangleLoadingIndicatorMode.place,
+    );
+  });
+
   testWidgets('exports and renders TriangleLoadingIndicator', (tester) async {
     const progress = AlwaysStoppedAnimation<double>(0.5);
 
@@ -33,7 +44,7 @@ void main() {
       const MaterialApp(
         home: TriangleLoadingIndicator(
           size: 100,
-          mode: TriangleLoadingIndicatorMode.fuze,
+          mode: TriangleLoadingIndicatorMode.trace,
           iterations: 1,
           progress: AlwaysStoppedAnimation(0.0),
         ),
@@ -57,8 +68,8 @@ void main() {
     const color = Colors.blue;
     expect(
       const TriangleLoadingIndicator(
-        mode: TriangleLoadingIndicatorMode.fuze,
-        fuzeStyle: FuzeStyle.noEnd,
+        mode: TriangleLoadingIndicatorMode.trace,
+        traceStyle: TraceStyle.continuous,
       ).iterationDuration,
       const Duration(milliseconds: 1800),
     );
@@ -66,8 +77,8 @@ void main() {
       await tester.pumpWidget(
         MaterialApp(
           home: TriangleLoadingIndicator(
-            mode: TriangleLoadingIndicatorMode.fuze,
-            fuzeStyle: FuzeStyle.noEnd,
+            mode: TriangleLoadingIndicatorMode.trace,
+            traceStyle: TraceStyle.continuous,
             baseColor: color,
             progress: AlwaysStoppedAnimation(progress),
           ),
@@ -107,6 +118,38 @@ void main() {
       expect((arrowTip - expectedTip).distance, lessThan(0.5));
     }
   });
+
+  testWidgets(
+    'Continuous can hide its arrow without changing the moving segment',
+    (tester) async {
+      final pathCounts = <int>[];
+      final segmentLengths = <double>[];
+      for (final showArrow in [true, false]) {
+        await tester.pumpWidget(
+          MaterialApp(
+            home: TriangleLoadingIndicator(
+              mode: TriangleLoadingIndicatorMode.trace,
+              traceStyle: TraceStyle.continuous,
+              showArrow: showArrow,
+              progress: const AlwaysStoppedAnimation(0.2),
+            ),
+          ),
+        );
+        final paint = tester.widget<CustomPaint>(
+          find.descendant(
+            of: find.byType(TriangleLoadingIndicator),
+            matching: find.byType(CustomPaint),
+          ),
+        );
+        final canvas = _PathCanvas();
+        paint.painter!.paint(canvas, const Size.square(100));
+        pathCounts.add(canvas.paths.length);
+        segmentLengths.add(canvas.paths[1].computeMetrics().single.length);
+      }
+      expect(pathCounts, [3, 2]);
+      expect(segmentLengths.first, segmentLengths.last);
+    },
+  );
 
   testWidgets('fuze burns away every reference segment in its recorded order', (
     tester,
@@ -150,7 +193,7 @@ void main() {
       await tester.pumpWidget(
         MaterialApp(
           home: TriangleLoadingIndicator(
-            mode: TriangleLoadingIndicatorMode.fuze,
+            mode: TriangleLoadingIndicatorMode.trace,
             iterations: 1,
             progress: AlwaysStoppedAnimation(progress),
           ),

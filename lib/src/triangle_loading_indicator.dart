@@ -6,19 +6,19 @@ import 'package:flutter/material.dart';
 /// The animation family used by the loading indicator.
 enum TriangleLoadingIndicatorMode {
   /// Recursively builds and zooms nested triangles.
-  standard,
+  place,
 
   /// Follows the fixed circle and triangle route.
-  fuze,
+  trace,
 }
 
-/// The playback style of the Fuze animation family.
-enum FuzeStyle {
+/// The playback style of the Trace animation family.
+enum TraceStyle {
   /// Burns away the route from its beginning with a glowing ember.
-  trace,
+  fuze,
 
-  /// Loops a moving arrow over a faint guide.
-  noEnd,
+  /// Loops a moving segment over a faint guide.
+  continuous,
 }
 
 /// An animated loading indicator made from recursively nested triangles.
@@ -50,12 +50,13 @@ class TriangleLoadingIndicator extends StatefulWidget {
     this.removingOld = true,
     this.oneByOne = false,
     this.zoomSpin = false,
-    this.mode = TriangleLoadingIndicatorMode.standard,
-    this.fuzeStyle = FuzeStyle.trace,
+    this.mode = TriangleLoadingIndicatorMode.place,
+    this.traceStyle = TraceStyle.fuze,
+    this.showArrow = true,
   }) : iterationDuration =
            iterationDuration ??
-           (mode == TriangleLoadingIndicatorMode.fuze &&
-                   fuzeStyle == FuzeStyle.noEnd
+           (mode == TriangleLoadingIndicatorMode.trace &&
+                   traceStyle == TraceStyle.continuous
                ? const Duration(milliseconds: 1800)
                : const Duration(milliseconds: 3400)),
        assert(iterations == null || iterations > 0),
@@ -113,18 +114,21 @@ class TriangleLoadingIndicator extends StatefulWidget {
   /// When false, the camera zooms straight and triangle orientation alternates.
   final bool zoomSpin;
 
-  /// The animation family, either nested triangles or the fixed Fuze route.
+  /// The animation family, either Place or the fixed Trace route.
   final TriangleLoadingIndicatorMode mode;
 
-  /// The playback style used when [mode] is [TriangleLoadingIndicatorMode.fuze].
-  final FuzeStyle fuzeStyle;
+  /// The playback style used when [mode] is [TriangleLoadingIndicatorMode.trace].
+  final TraceStyle traceStyle;
+
+  /// Whether the Continuous trace has an arrowhead on its leading edge.
+  final bool showArrow;
 
   /// Number of iterations required for the geometry and visible hues to repeat.
   ///
   /// Outline-only animation needs two iterations by default. With fills, the
   /// original 7-degree hue step repeats after 60 iterations (seven hue turns).
   int get loopIterations {
-    if (mode == TriangleLoadingIndicatorMode.fuze) return 1;
+    if (mode == TriangleLoadingIndicatorMode.trace) return 1;
     final depthStep = oneByOne ? 1 : trianglesPerCycle;
     final geometryPeriod = zoomSpin
         ? 1
@@ -184,7 +188,7 @@ class _TriangleLoadingIndicatorState extends State<TriangleLoadingIndicator>
         oldWidget.oneByOne != widget.oneByOne ||
         oldWidget.zoomSpin != widget.zoomSpin ||
         oldWidget.mode != widget.mode ||
-        oldWidget.fuzeStyle != widget.fuzeStyle) {
+        oldWidget.traceStyle != widget.traceStyle) {
       _syncAutoplay();
     }
   }
@@ -216,19 +220,21 @@ class _TriangleLoadingIndicatorState extends State<TriangleLoadingIndicator>
   @override
   Widget build(BuildContext context) {
     final animation = widget.progress ?? _controller;
-    if (widget.mode == TriangleLoadingIndicatorMode.fuze) {
+    if (widget.mode == TriangleLoadingIndicatorMode.trace) {
       return SizedBox(
         width: widget.size,
         height: widget.size,
         child: RepaintBoundary(
           child: CustomPaint(
-            painter: _FuzePainter(
-              style: widget.fuzeStyle,
+            painter: _TracePainter(
+              style: widget.traceStyle,
+              showArrow: widget.showArrow,
               strokeWidth: widget.strokeWidth,
               strokeColor: widget.strokeColor,
               background: widget.background,
               showFill: widget.showFill,
-              fillColors: widget.showFill && widget.fuzeStyle == FuzeStyle.trace
+              fillColors:
+                  widget.showFill && widget.traceStyle == TraceStyle.fuze
                   ? List.generate(
                       4,
                       (index) => HSLColor.fromAHSL(
@@ -258,7 +264,7 @@ class _TriangleLoadingIndicatorState extends State<TriangleLoadingIndicator>
       height: widget.size,
       child: RepaintBoundary(
         child: CustomPaint(
-          painter: _StandardPainter(
+          painter: _PlacePainter(
             animation: animation,
             iterations: widget.iterations ?? widget.loopIterations,
             targetDeg: widget.targetDeg,
@@ -285,8 +291,8 @@ class _TriangleLoadingIndicatorState extends State<TriangleLoadingIndicator>
   }
 }
 
-class _StandardPainter extends CustomPainter {
-  _StandardPainter({
+class _PlacePainter extends CustomPainter {
+  _PlacePainter({
     required this.animation,
     required this.iterations,
     required this.targetDeg,
@@ -305,7 +311,7 @@ class _StandardPainter extends CustomPainter {
     required this.removingOld,
     required this.oneByOne,
     required this.zoomSpin,
-  }) : geometry = _StandardGeometry(
+  }) : geometry = _PlaceGeometry(
          stepDeg: targetDeg / trianglesPerCycle,
          trianglesPerCycle: trianglesPerCycle,
          oneByOne: oneByOne,
@@ -335,7 +341,7 @@ class _StandardPainter extends CustomPainter {
   final bool removingOld;
   final bool oneByOne;
   final bool zoomSpin;
-  final _StandardGeometry geometry;
+  final _PlaceGeometry geometry;
 
   @override
   void paint(Canvas canvas, Size size) {
@@ -463,7 +469,7 @@ class _StandardPainter extends CustomPainter {
   }
 
   @override
-  bool shouldRepaint(covariant _StandardPainter oldDelegate) =>
+  bool shouldRepaint(covariant _PlacePainter oldDelegate) =>
       animation != oldDelegate.animation ||
       iterations != oldDelegate.iterations ||
       targetDeg != oldDelegate.targetDeg ||
@@ -484,8 +490,8 @@ class _StandardPainter extends CustomPainter {
       zoomSpin != oldDelegate.zoomSpin;
 }
 
-class _StandardGeometry {
-  _StandardGeometry({
+class _PlaceGeometry {
+  _PlaceGeometry({
     required double stepDeg,
     required int trianglesPerCycle,
     required bool oneByOne,
@@ -522,9 +528,10 @@ class _StandardGeometry {
   final paths = <int, Path>{};
 }
 
-class _FuzePainter extends CustomPainter {
-  const _FuzePainter({
+class _TracePainter extends CustomPainter {
+  const _TracePainter({
     required this.style,
+    required this.showArrow,
     required this.strokeWidth,
     required this.strokeColor,
     required this.background,
@@ -542,7 +549,8 @@ class _FuzePainter extends CustomPainter {
   final Color color;
   final bool reducedMotion;
 
-  final FuzeStyle style;
+  final TraceStyle style;
+  final bool showArrow;
   final double strokeWidth;
   final Color strokeColor;
   final Color background;
@@ -551,18 +559,18 @@ class _FuzePainter extends CustomPainter {
 
   @override
   void paint(Canvas canvas, Size size) {
-    if (style == FuzeStyle.noEnd) {
-      _paintNoEnd(canvas, size);
+    if (style == TraceStyle.continuous) {
+      _paintContinuous(canvas, size);
     } else {
       final fraction =
           progress > 0 && (progress - progress.round()).abs() < 1e-9
           ? 1.0
           : progress % 1;
-      _paintTrace(canvas, size, fraction);
+      _paintFuze(canvas, size, fraction);
     }
   }
 
-  void _paintTrace(Canvas canvas, Size size, double progress) {
+  void _paintFuze(Canvas canvas, Size size, double progress) {
     final scale = math.min(size.width, size.height) / 900;
     canvas.save();
     canvas.translate(
@@ -607,7 +615,7 @@ class _FuzePainter extends CustomPainter {
       ..strokeCap = StrokeCap.round
       ..strokeJoin = StrokeJoin.round
       ..color = strokeColor;
-    final metric = _FuzeGeometry.metric;
+    final metric = _TraceGeometry.metric;
     final distance = metric.length * progress;
     canvas.drawPath(metric.extractPath(distance, metric.length), stroke);
     if (progress <= 0 || progress >= 1) {
@@ -636,8 +644,8 @@ class _FuzePainter extends CustomPainter {
     canvas.restore();
   }
 
-  void _paintNoEnd(Canvas canvas, Size size) {
-    final route = _FuzeGeometry.route;
+  void _paintContinuous(Canvas canvas, Size size) {
+    final route = _TraceGeometry.route;
     final scale = math.min(size.width, size.height) / 1040;
     canvas.save();
     canvas.translate(
@@ -658,7 +666,7 @@ class _FuzePainter extends CustomPainter {
     if (reducedMotion) {
       canvas.drawPath(route, stroke);
     } else {
-      final metric = _FuzeGeometry.metric;
+      final metric = _TraceGeometry.metric;
       final start = (progress % 1) * metric.length;
       final end = start + metric.length * 0.26;
       canvas.drawPath(
@@ -668,22 +676,26 @@ class _FuzePainter extends CustomPainter {
       if (end > metric.length) {
         canvas.drawPath(metric.extractPath(0, end - metric.length), stroke);
       }
-      final head = metric.getTangentForOffset(end % metric.length)!;
-      final forward = head.vector;
-      final normal = Offset(-forward.dy, forward.dx);
-      final tip = head.position + forward * 80;
-      final base = head.position - forward * 40;
-      canvas.drawPath(
-        Path()..addPolygon([tip, base + normal * 66, base - normal * 66], true),
-        Paint()..color = color,
-      );
+      if (showArrow) {
+        final head = metric.getTangentForOffset(end % metric.length)!;
+        final forward = head.vector;
+        final normal = Offset(-forward.dy, forward.dx);
+        final tip = head.position + forward * 80;
+        final base = head.position - forward * 40;
+        canvas.drawPath(
+          Path()
+            ..addPolygon([tip, base + normal * 66, base - normal * 66], true),
+          Paint()..color = color,
+        );
+      }
     }
     canvas.restore();
   }
 
   @override
-  bool shouldRepaint(covariant _FuzePainter oldDelegate) =>
+  bool shouldRepaint(covariant _TracePainter oldDelegate) =>
       style != oldDelegate.style ||
+      showArrow != oldDelegate.showArrow ||
       strokeWidth != oldDelegate.strokeWidth ||
       strokeColor != oldDelegate.strokeColor ||
       background != oldDelegate.background ||
@@ -695,7 +707,7 @@ class _FuzePainter extends CustomPainter {
       reducedMotion != oldDelegate.reducedMotion;
 }
 
-class _FuzeGeometry {
+class _TraceGeometry {
   static final triangles = Path()
     ..moveTo(450, 9.45)
     ..lineTo(548.3474, 179.7927)
