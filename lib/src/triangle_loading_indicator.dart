@@ -1,6 +1,25 @@
 import 'dart:math' as math;
 
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
+
+/// The animation family used by the loading indicator.
+enum TriangleLoadingIndicatorMode {
+  /// Recursively builds and zooms nested triangles.
+  standard,
+
+  /// Follows the fixed circle and triangle route.
+  fuze,
+}
+
+/// The playback style of the Fuze animation family.
+enum FuzeStyle {
+  /// Burns away the route from its beginning with a glowing ember.
+  trace,
+
+  /// Loops a moving arrow over a faint guide.
+  noEnd,
+}
 
 /// An animated loading indicator made from recursively nested triangles.
 ///
@@ -13,7 +32,7 @@ class TriangleLoadingIndicator extends StatefulWidget {
     this.size = 48,
     this.targetDeg = 60,
     this.trianglesPerCycle = 6,
-    this.iterationDuration = const Duration(milliseconds: 3400),
+    Duration? iterationDuration,
     this.buildToZoomTimeRatio = 1.625,
     this.keepHistoryCycles = 2,
     this.strokeWidth = 2.2,
@@ -31,7 +50,15 @@ class TriangleLoadingIndicator extends StatefulWidget {
     this.removingOld = true,
     this.oneByOne = false,
     this.zoomSpin = false,
-  }) : assert(iterations == null || iterations > 0),
+    this.mode = TriangleLoadingIndicatorMode.standard,
+    this.fuzeStyle = FuzeStyle.trace,
+  }) : iterationDuration =
+           iterationDuration ??
+           (mode == TriangleLoadingIndicatorMode.fuze &&
+                   fuzeStyle == FuzeStyle.noEnd
+               ? const Duration(milliseconds: 1800)
+               : const Duration(milliseconds: 3400)),
+       assert(iterations == null || iterations > 0),
        assert(buildToZoomTimeRatio > 0);
 
   final double size;
@@ -86,26 +113,43 @@ class TriangleLoadingIndicator extends StatefulWidget {
   /// When false, the camera zooms straight and triangle orientation alternates.
   final bool zoomSpin;
 
-  /// Number of animation cycles required for the geometry and hues to return
-  /// to their starting state.
+  /// The animation family, either nested triangles or the fixed Fuze route.
+  final TriangleLoadingIndicatorMode mode;
+
+  /// The playback style used when [mode] is [TriangleLoadingIndicatorMode.fuze].
+  final FuzeStyle fuzeStyle;
+
+  /// Number of iterations required for the geometry and visible hues to repeat.
+  ///
+  /// Outline-only animation needs two iterations by default. With fills, the
+  /// original 7-degree hue step repeats after 60 iterations (seven hue turns).
   int get loopIterations {
+    if (mode == TriangleLoadingIndicatorMode.fuze) return 1;
     final depthStep = oneByOne ? 1 : trianglesPerCycle;
-    final maxCycles = math.max(1, maxDepth ~/ depthStep);
-    final rotationStep = targetDeg / trianglesPerCycle;
+    final geometryPeriod = zoomSpin
+        ? 1
+        : _stepPeriod(targetDeg, depthStep, 120 * trianglesPerCycle);
+    final colorPeriod = showFill ? _stepPeriod(hueStep, depthStep, 360) : 1;
+    return geometryPeriod ~/ geometryPeriod.gcd(colorPeriod) * colorPeriod;
+  }
 
-    bool isFullTurn(double angle) {
-      final remainder = angle.abs() % 360;
-      return remainder < 1e-7 || (360 - remainder) < 1e-7;
+  static int _stepPeriod(double degrees, int depthStep, int fullTurn) {
+    // Convert decimal degree steps to integer ratios before finding their period.
+    final scientific = degrees.abs().toString().toLowerCase().split('e');
+    final decimal = scientific.first.split('.');
+    final fractional = decimal.length == 2 ? decimal.last : '';
+    final exponent = scientific.length == 2 ? int.parse(scientific.last) : 0;
+    final decimalPlaces = fractional.length - exponent;
+    var numerator = BigInt.parse('${decimal.first}$fractional');
+    var denominator = BigInt.one;
+    if (decimalPlaces >= 0) {
+      denominator = BigInt.from(10).pow(decimalPlaces);
+    } else {
+      numerator *= BigInt.from(10).pow(-decimalPlaces);
     }
-
-    for (var cycles = 1; cycles <= maxCycles; cycles++) {
-      final depth = cycles * depthStep;
-      if (isFullTurn(depth * rotationStep) && isFullTurn(depth * hueStep)) {
-        return cycles;
-      }
-    }
-
-    return maxCycles;
+    final turn = BigInt.from(fullTurn) * denominator;
+    final step = numerator * BigInt.from(depthStep);
+    return (turn ~/ turn.gcd(step)).toInt();
   }
 
   @override
@@ -134,9 +178,13 @@ class _TriangleLoadingIndicatorState extends State<TriangleLoadingIndicator>
         oldWidget.targetDeg != widget.targetDeg ||
         oldWidget.trianglesPerCycle != widget.trianglesPerCycle ||
         oldWidget.hueStep != widget.hueStep ||
+        oldWidget.showFill != widget.showFill ||
         oldWidget.maxDepth != widget.maxDepth ||
         oldWidget.removingOld != widget.removingOld ||
-        oldWidget.oneByOne != widget.oneByOne) {
+        oldWidget.oneByOne != widget.oneByOne ||
+        oldWidget.zoomSpin != widget.zoomSpin ||
+        oldWidget.mode != widget.mode ||
+        oldWidget.fuzeStyle != widget.fuzeStyle) {
       _syncAutoplay();
     }
   }
@@ -168,70 +216,88 @@ class _TriangleLoadingIndicatorState extends State<TriangleLoadingIndicator>
   @override
   Widget build(BuildContext context) {
     final animation = widget.progress ?? _controller;
-    final cycleSeconds =
-        widget.iterationDuration.inMicroseconds /
-        Duration.microsecondsPerSecond;
-    final buildPhaseCount = widget.removingOld || widget.oneByOne ? 2 : 1;
-    final zoomSeconds =
-        cycleSeconds / (1 + buildPhaseCount * widget.buildToZoomTimeRatio);
-    final buildSeconds = zoomSeconds * widget.buildToZoomTimeRatio;
-
+    if (widget.mode == TriangleLoadingIndicatorMode.fuze) {
+      return SizedBox(
+        width: widget.size,
+        height: widget.size,
+        child: RepaintBoundary(
+          child: CustomPaint(
+            painter: _FuzePainter(
+              style: widget.fuzeStyle,
+              strokeWidth: widget.strokeWidth,
+              strokeColor: widget.strokeColor,
+              background: widget.background,
+              showFill: widget.showFill,
+              fillColors: widget.showFill && widget.fuzeStyle == FuzeStyle.trace
+                  ? List.generate(
+                      4,
+                      (index) => HSLColor.fromAHSL(
+                        1,
+                        (HSLColor.fromColor(
+                                  widget.baseColor ??
+                                      Theme.of(context).colorScheme.primary,
+                                ).hue +
+                                index * widget.hueStep) %
+                            360,
+                        widget.saturation,
+                        widget.lightness,
+                      ).toColor(),
+                    )
+                  : const [],
+              animation: animation,
+              iterations: widget.iterations ?? 1,
+              color: widget.baseColor ?? Theme.of(context).colorScheme.primary,
+              reducedMotion: MediaQuery.disableAnimationsOf(context),
+            ),
+          ),
+        ),
+      );
+    }
     return SizedBox(
       width: widget.size,
       height: widget.size,
       child: RepaintBoundary(
-        child: AnimatedBuilder(
-          animation: animation,
-          builder: (context, child) {
-            final tSec =
-                animation.value.clamp(0.0, 1.0) *
-                cycleSeconds *
-                (widget.iterations ?? widget.loopIterations);
-            return CustomPaint(
-              painter: _TriangleLoadingPainter(
-                tSec: tSec,
-                targetDeg: widget.targetDeg,
-                trianglesPerCycle: widget.trianglesPerCycle,
-                buildSeconds: buildSeconds,
-                zoomSeconds: zoomSeconds,
-                keepHistoryCycles: widget.keepHistoryCycles,
-                strokeWidth: widget.strokeWidth,
-                strokeColor: widget.strokeColor,
-                background: widget.background,
-                showFill: widget.showFill,
-                baseColor:
-                    widget.baseColor ?? Theme.of(context).colorScheme.primary,
-                baseHue: widget.baseHue,
-                saturation: widget.saturation,
-                lightness: widget.lightness,
-                hueStep: widget.hueStep,
-                maxDepth: widget.maxDepth,
-                removingOld: widget.removingOld,
-                oneByOne: widget.oneByOne,
-                zoomSpin: widget.zoomSpin,
-              ),
-            );
-          },
+        child: CustomPaint(
+          painter: _StandardPainter(
+            animation: animation,
+            iterations: widget.iterations ?? widget.loopIterations,
+            targetDeg: widget.targetDeg,
+            trianglesPerCycle: widget.trianglesPerCycle,
+            buildToZoomTimeRatio: widget.buildToZoomTimeRatio,
+            keepHistoryCycles: widget.keepHistoryCycles,
+            strokeWidth: widget.strokeWidth,
+            strokeColor: widget.strokeColor,
+            background: widget.background,
+            showFill: widget.showFill,
+            baseColor:
+                widget.baseColor ?? Theme.of(context).colorScheme.primary,
+            saturation: widget.saturation,
+            lightness: widget.lightness,
+            hueStep: widget.hueStep,
+            maxDepth: widget.maxDepth,
+            removingOld: widget.removingOld,
+            oneByOne: widget.oneByOne,
+            zoomSpin: widget.zoomSpin,
+          ),
         ),
       ),
     );
   }
 }
 
-class _TriangleLoadingPainter extends CustomPainter {
-  _TriangleLoadingPainter({
-    required this.tSec,
+class _StandardPainter extends CustomPainter {
+  _StandardPainter({
+    required this.animation,
+    required this.iterations,
     required this.targetDeg,
     required this.trianglesPerCycle,
-    required this.buildSeconds,
-    required this.zoomSeconds,
+    required this.buildToZoomTimeRatio,
     required this.keepHistoryCycles,
     required this.strokeWidth,
     required this.strokeColor,
     required this.background,
     required this.showFill,
     required this.baseColor,
-    required this.baseHue,
     required this.saturation,
     required this.lightness,
     required this.hueStep,
@@ -239,19 +305,28 @@ class _TriangleLoadingPainter extends CustomPainter {
     required this.removingOld,
     required this.oneByOne,
     required this.zoomSpin,
-  });
+  }) : geometry = _StandardGeometry(
+         stepDeg: targetDeg / trianglesPerCycle,
+         trianglesPerCycle: trianglesPerCycle,
+         oneByOne: oneByOne,
+         removingOld: removingOld,
+         keepHistoryCycles: keepHistoryCycles,
+         maxDepth: maxDepth,
+       ),
+       baseHue = HSLColor.fromColor(baseColor).hue,
+       super(repaint: animation);
 
-  final double tSec;
+  final Animation<double> animation;
+  final int iterations;
   final double targetDeg;
   final int trianglesPerCycle;
-  final double buildSeconds;
-  final double zoomSeconds;
+  final double buildToZoomTimeRatio;
   final int keepHistoryCycles;
   final double strokeWidth;
   final Color strokeColor;
   final Color background;
   final bool showFill;
-  final Color? baseColor;
+  final Color baseColor;
   final double baseHue;
   final double saturation;
   final double lightness;
@@ -260,403 +335,403 @@ class _TriangleLoadingPainter extends CustomPainter {
   final bool removingOld;
   final bool oneByOne;
   final bool zoomSpin;
+  final _StandardGeometry geometry;
 
   @override
   void paint(Canvas canvas, Size size) {
-    final side = math.min(size.width, size.height);
+    if (size.isEmpty) return;
+    final cycles = animation.value.clamp(0.0, 1.0) * iterations;
+    final cycleIndex = cycles.floor();
+    final local = cycles - cycleIndex;
+    final depthStep = oneByOne ? 1 : trianglesPerCycle;
+    final hasRemoval = removingOld || oneByOne;
+    final buildSpan =
+        buildToZoomTimeRatio /
+        (1 + (hasRemoval ? 2 : 1) * buildToZoomTimeRatio);
+    final removalSpan = hasRemoval ? buildSpan : 0.0;
+    final zoomSpan = 1 - buildSpan - removalSpan;
+    final inRemoval = oneByOne
+        ? local < removalSpan
+        : hasRemoval && local >= buildSpan && local < buildSpan + removalSpan;
+    final inBuild = oneByOne
+        ? !inRemoval && local < removalSpan + buildSpan
+        : local < buildSpan;
+    final phaseProgress =
+        (oneByOne
+                ? inRemoval
+                      ? local / removalSpan
+                      : inBuild
+                      ? (local - removalSpan) / buildSpan
+                      : (local - removalSpan - buildSpan) / zoomSpan
+                : inBuild
+                ? local / buildSpan
+                : inRemoval
+                ? (local - buildSpan) / removalSpan
+                : (local - buildSpan - removalSpan) / zoomSpan)
+            .clamp(0.0, 1.0);
+    final zoom = inBuild || inRemoval
+        ? 0.0
+        : phaseProgress < 0.5
+        ? 4 * phaseProgress * phaseProgress * phaseProgress
+        : 1 - math.pow(-2 * phaseProgress + 2, 3) / 2;
+    final stepRadians = targetDeg / trianglesPerCycle * math.pi / 180;
+    final endScale = math.pow(geometry.stepScale, -depthStep).toDouble();
+    final endAngle = zoomSpin ? -depthStep * stepRadians : 0.0;
+    final real = 1 + (endScale * math.cos(endAngle) - 1) * zoom;
+    final imaginary = endScale * math.sin(endAngle) * zoom;
+    final radius = math.min(size.width, size.height) * 0.46;
+    final cameraScale = radius * math.sqrt(real * real + imaginary * imaginary);
+    final rotation =
+        (zoomSpin
+            ? 0.0
+            : (cycleIndex * depthStep * stepRadians) % (2 * math.pi / 3)) +
+        math.atan2(imaginary, real);
     final center = Offset(size.width / 2, size.height / 2);
-    final outerRadius = side * 0.46;
-    final stepDeg = targetDeg / trianglesPerCycle;
+    final circle = Rect.fromCircle(center: center, radius: radius);
+    canvas.save();
+    canvas.clipPath(Path()..addOval(circle));
+    canvas.drawCircle(center, radius, Paint()..color = background);
+    canvas.translate(center.dx, center.dy);
+    canvas.rotate(rotation);
+    canvas.scale(cameraScale);
+    final stroke = Paint()
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = strokeWidth / cameraScale;
+    final fill = Paint();
 
-    final triangles = <List<Offset>>[
-      _equilateral(center: center, radius: outerRadius),
-    ];
-
-    void ensureTriangles(int minCount) {
-      while (triangles.length < minCount && triangles.length < maxDepth) {
-        final solved = _solveInnerTriangle(triangles.last, stepDeg);
-        if (solved == null || solved.scale >= 0.999999) break;
-        triangles.add(solved.vertices);
+    void drawAt(int depth, double alpha) {
+      final path = geometry.paths[depth];
+      if (path == null || alpha <= 0) return;
+      if (showFill) {
+        final hue =
+            (baseHue + (cycleIndex * depthStep + depth) * hueStep) % 360;
+        fill.color = HSLColor.fromAHSL(
+          alpha,
+          hue,
+          saturation,
+          lightness,
+        ).toColor();
+        canvas.drawPath(path, fill);
       }
+      stroke.color = strokeColor.withValues(alpha: alpha);
+      canvas.drawPath(path, stroke);
     }
 
-    final nPerCycle = oneByOne ? 1 : trianglesPerCycle;
-    ensureTriangles(nPerCycle + 3);
-
-    final phaseBuildSeconds = buildSeconds;
-    final phaseZoomSeconds = zoomSeconds;
-    final removalSeconds = removingOld || oneByOne ? phaseBuildSeconds : 0.0;
-    final cycleLen = phaseBuildSeconds + removalSeconds + phaseZoomSeconds;
-    final cycleIndex = (tSec / cycleLen).floor();
-    final local = tSec % cycleLen;
-    final inRemoval = oneByOne
-        ? local < removalSeconds
-        : removingOld &&
-              local >= phaseBuildSeconds &&
-              local < phaseBuildSeconds + removalSeconds;
-    final inBuild = oneByOne
-        ? !inRemoval && local < removalSeconds + phaseBuildSeconds
-        : local < phaseBuildSeconds;
-    final p = oneByOne
-        ? inRemoval
-              ? local / removalSeconds
-              : inBuild
-              ? (local - removalSeconds) / phaseBuildSeconds
-              : (local - removalSeconds - phaseBuildSeconds) / phaseZoomSeconds
-        : inBuild
-        ? local / phaseBuildSeconds
-        : inRemoval
-        ? (local - phaseBuildSeconds) / removalSeconds
-        : (local - phaseBuildSeconds - removalSeconds) / phaseZoomSeconds;
-
-    final oneByOneWindowSize = trianglesPerCycle + 1;
-    final neededDepth = oneByOne
-        ? cycleIndex + oneByOneWindowSize + 1
-        : (cycleIndex + 1) * nPerCycle + 3;
-    ensureTriangles(neededDepth);
-    final maxDepthIdx = triangles.length - 1;
-    final maxRenderableCycles = oneByOne
-        ? math.max(1, maxDepthIdx - oneByOneWindowSize + 1)
-        : math.max(1, ((maxDepthIdx - nPerCycle) / nPerCycle).floor() + 1);
-    final effectiveCycleIndex = cycleIndex % maxRenderableCycles;
-    final baseDepth = effectiveCycleIndex * nPerCycle;
-
-    final startIdx = math.min(baseDepth, maxDepthIdx);
-    final endIdx = math.min(baseDepth + nPerCycle, maxDepthIdx);
-    final cameraStart = zoomSpin
-        ? _affineFromTriangles(triangles[startIdx], triangles[0])
-        : _scaleOnlyAffineFromTriangles(triangles[startIdx], triangles[0]);
-    final cameraEnd = zoomSpin
-        ? _affineFromTriangles(triangles[endIdx], triangles[0])
-        : _scaleOnlyAffineFromTriangles(triangles[endIdx], triangles[0]);
-    final camera = inBuild || inRemoval
-        ? cameraStart
-        : _mixAffine(cameraStart, cameraEnd, _easeInOut(p));
-
-    final clipPath = Path()
-      ..addOval(Rect.fromCircle(center: center, radius: outerRadius));
-    canvas.save();
-    canvas.clipPath(clipPath);
-    canvas.drawCircle(
-      center,
-      outerRadius,
-      Paint()
-        ..style = PaintingStyle.fill
-        ..color = background,
-    );
-
-    final currentTopDepth = inBuild
-        ? (baseDepth + p * nPerCycle)
-        : (baseDepth + nPerCycle.toDouble());
-    final fullTopDepth = math.min(maxDepthIdx, currentTopDepth.floor());
-    final partialAlpha = currentTopDepth - currentTopDepth.floor();
-    final historyStart = removingOld
-        ? baseDepth
-        : math.max(0, baseDepth - keepHistoryCycles * nPerCycle);
-
-    void drawAt(int triIdx, double alpha) {
-      _drawTriangle(
-        canvas,
-        triangles[triIdx]
-            .map((pt) => _applyAffine(camera, pt))
-            .toList(growable: false),
-        _triColor(triIdx),
-        alpha,
-      );
+    void drawRange(int first, int last) {
+      for (var depth = first; depth <= last; depth++) {
+        drawAt(depth, 1);
+      }
     }
 
     if (oneByOne) {
-      final firstInnerIdx = math.min(startIdx + 1, maxDepthIdx);
-      final previousLastIdx = math.min(
-        baseDepth + oneByOneWindowSize - 1,
-        maxDepthIdx,
-      );
-      final newLastIdx = math.min(baseDepth + oneByOneWindowSize, maxDepthIdx);
-
       if (inRemoval) {
-        drawAt(startIdx, 1 - p);
-        for (var triIdx = firstInnerIdx; triIdx <= previousLastIdx; triIdx++) {
-          drawAt(triIdx, 1);
-        }
+        drawAt(0, 1 - phaseProgress);
+        drawRange(1, trianglesPerCycle);
       } else if (inBuild) {
-        for (var triIdx = firstInnerIdx; triIdx <= previousLastIdx; triIdx++) {
-          drawAt(triIdx, 1);
-        }
-        drawAt(newLastIdx, p);
+        drawRange(1, trianglesPerCycle);
+        drawAt(trianglesPerCycle + 1, phaseProgress);
       } else {
-        for (var triIdx = firstInnerIdx; triIdx <= newLastIdx; triIdx++) {
-          drawAt(triIdx, 1);
-        }
+        drawRange(1, trianglesPerCycle + 1);
       }
     } else if (inRemoval) {
-      final removableCount = math.max(0, endIdx - historyStart);
-      final removalPosition = p * removableCount;
-      final firstRemaining = math.min(
-        endIdx,
-        historyStart + removalPosition.floor(),
-      );
-      final firstAlpha = 1 - (removalPosition - removalPosition.floor());
-
-      if (firstRemaining < endIdx && firstAlpha > 1e-6) {
-        drawAt(firstRemaining, firstAlpha);
-      }
-      for (
-        var triIdx = math.min(endIdx, firstRemaining + 1);
-        triIdx <= endIdx;
-        triIdx++
-      ) {
-        drawAt(triIdx, 1);
-      }
+      final removal = phaseProgress * depthStep;
+      final first = removal.floor();
+      drawAt(first, 1 - (removal - first));
+      drawRange(first + 1, depthStep);
+    } else if (inBuild) {
+      final depth = phaseProgress * depthStep;
+      drawRange(geometry.firstDepth, depth.floor());
+      drawAt(depth.floor() + 1, depth - depth.floor());
     } else {
-      final drawStart = removingOld && !inBuild ? endIdx : historyStart;
-      for (var triIdx = drawStart; triIdx <= fullTopDepth; triIdx++) {
-        drawAt(triIdx, 1);
-      }
-
-      final partialIdx = fullTopDepth + 1;
-      if (partialIdx <= maxDepthIdx && partialAlpha > 1e-6) {
-        drawAt(partialIdx, partialAlpha);
-      }
-    }
-
-    canvas.restore();
-
-    final boundary = Paint()
-      ..style = PaintingStyle.stroke
-      ..strokeWidth = strokeWidth
-      ..color = strokeColor;
-    canvas.drawCircle(center, outerRadius, boundary);
-  }
-
-  List<Offset> _equilateral({
-    required Offset center,
-    required double radius,
-    double rotationDeg = 0,
-  }) {
-    final points = <Offset>[];
-    final rot = rotationDeg * math.pi / 180;
-    for (var k = 0; k < 3; k++) {
-      final a = rot + (-math.pi / 2) + (k * 2 * math.pi / 3);
-      points.add(
-        Offset(
-          center.dx + radius * math.cos(a),
-          center.dy + radius * math.sin(a),
-        ),
-      );
-    }
-    return points;
-  }
-
-  _SolveResult? _solveInnerTriangle(
-    List<Offset> outerVertices,
-    double thetaDeg,
-  ) {
-    final th = thetaDeg * math.pi / 180;
-    final r00 = math.cos(th);
-    final r01 = -math.sin(th);
-    final r10 = math.sin(th);
-    final r11 = math.cos(th);
-
-    final a = List.generate(6, (_) => List<double>.filled(6, 0));
-    final b = List<double>.filled(6, 0);
-
-    for (var i = 0; i < 3; i++) {
-      final vi = outerVertices[i];
-      final vj = outerVertices[(i + 1) % 3];
-      final edgeX = vj.dx - vi.dx;
-      final edgeY = vj.dy - vi.dy;
-      final rviX = r00 * vi.dx + r01 * vi.dy;
-      final rviY = r10 * vi.dx + r11 * vi.dy;
-
-      final rowX = 2 * i;
-      final rowY = rowX + 1;
-
-      a[rowX][0] = rviX;
-      a[rowX][1] = 1;
-      a[rowX][3 + i] = -edgeX;
-      b[rowX] = vi.dx;
-
-      a[rowY][0] = rviY;
-      a[rowY][2] = 1;
-      a[rowY][3 + i] = -edgeY;
-      b[rowY] = vi.dy;
-    }
-
-    final x = _solveLinear6(a, b);
-    if (x == null) return null;
-
-    final scale = x[0];
-    final tx = x[1];
-    final ty = x[2];
-
-    final w = outerVertices
-        .map((p) {
-          final rx = r00 * p.dx + r01 * p.dy;
-          final ry = r10 * p.dx + r11 * p.dy;
-          return Offset(scale * rx + tx, scale * ry + ty);
-        })
-        .toList(growable: false);
-
-    return _SolveResult(vertices: w, scale: scale);
-  }
-
-  List<double>? _solveLinear6(List<List<double>> a, List<double> b) {
-    const n = 6;
-    final m = List.generate(n, (i) => [...a[i], b[i]]);
-
-    for (var col = 0; col < n; col++) {
-      var piv = col;
-      for (var r = col + 1; r < n; r++) {
-        if (m[r][col].abs() > m[piv][col].abs()) piv = r;
-      }
-      if (m[piv][col].abs() < 1e-12) return null;
-      if (piv != col) {
-        final tmp = m[col];
-        m[col] = m[piv];
-        m[piv] = tmp;
-      }
-
-      final pv = m[col][col];
-      for (var j = col; j <= n; j++) {
-        m[col][j] /= pv;
-      }
-
-      for (var r = 0; r < n; r++) {
-        if (r == col) continue;
-        final f = m[r][col];
-        if (f == 0) continue;
-        for (var j = col; j <= n; j++) {
-          m[r][j] -= f * m[col][j];
+      if (removingOld) {
+        drawAt(depthStep, 1);
+      } else {
+        for (var depth = geometry.firstDepth; depth <= depthStep; depth++) {
+          drawAt(depth, depth < geometry.firstDepth + depthStep ? 1 - zoom : 1);
         }
       }
     }
-
-    return List.generate(n, (i) => m[i][n]);
-  }
-
-  _Affine _affineFromTriangles(List<Offset> src, List<Offset> dst) {
-    final s0 = src[0], s1 = src[1], s2 = src[2];
-    final d0 = dst[0], d1 = dst[1], d2 = dst[2];
-
-    final a = <List<double>>[
-      [s0.dx, s0.dy, 1.0, 0.0, 0.0, 0.0],
-      [0.0, 0.0, 0.0, s0.dx, s0.dy, 1.0],
-      [s1.dx, s1.dy, 1.0, 0.0, 0.0, 0.0],
-      [0.0, 0.0, 0.0, s1.dx, s1.dy, 1.0],
-      [s2.dx, s2.dy, 1.0, 0.0, 0.0, 0.0],
-      [0.0, 0.0, 0.0, s2.dx, s2.dy, 1.0],
-    ];
-    final b = [d0.dx, d0.dy, d1.dx, d1.dy, d2.dx, d2.dy];
-
-    final x = _solveLinear6(a, b);
-    if (x == null) return const _Affine(a: 1, b: 0, c: 0, d: 1, tx: 0, ty: 0);
-
-    return _Affine(a: x[0], b: x[1], tx: x[2], c: x[3], d: x[4], ty: x[5]);
-  }
-
-  _Affine _mixAffine(_Affine a, _Affine b, double t) {
-    return _Affine(
-      a: a.a + (b.a - a.a) * t,
-      b: a.b + (b.b - a.b) * t,
-      c: a.c + (b.c - a.c) * t,
-      d: a.d + (b.d - a.d) * t,
-      tx: a.tx + (b.tx - a.tx) * t,
-      ty: a.ty + (b.ty - a.ty) * t,
+    canvas.restore();
+    canvas.drawCircle(
+      center,
+      radius,
+      Paint()
+        ..style = PaintingStyle.stroke
+        ..strokeWidth = strokeWidth
+        ..color = strokeColor,
     );
-  }
-
-  _Affine _scaleOnlyAffineFromTriangles(List<Offset> src, List<Offset> dst) {
-    Offset centroid(List<Offset> points) {
-      return points.reduce((a, b) => a + b) / points.length.toDouble();
-    }
-
-    final srcCenter = centroid(src);
-    final dstCenter = centroid(dst);
-    final srcSide = (src[1] - src[0]).distance;
-    final dstSide = (dst[1] - dst[0]).distance;
-    final scale = dstSide / srcSide;
-
-    return _Affine(
-      a: scale,
-      b: 0,
-      c: 0,
-      d: scale,
-      tx: dstCenter.dx - scale * srcCenter.dx,
-      ty: dstCenter.dy - scale * srcCenter.dy,
-    );
-  }
-
-  Offset _applyAffine(_Affine t, Offset p) {
-    return Offset(
-      t.a * p.dx + t.b * p.dy + t.tx,
-      t.c * p.dx + t.d * p.dy + t.ty,
-    );
-  }
-
-  double _easeInOut(double t) {
-    if (t < 0.5) return 4 * t * t * t;
-    return 1 - math.pow(-2 * t + 2, 3) / 2;
-  }
-
-  Color _triColor(int index) {
-    final seedHsl = baseColor != null ? HSLColor.fromColor(baseColor!) : null;
-    final hue = ((seedHsl?.hue ?? baseHue) + index * hueStep) % 360;
-    final hsl = HSLColor.fromAHSL(1, hue, saturation, lightness);
-    return hsl.toColor();
-  }
-
-  void _drawTriangle(
-    Canvas canvas,
-    List<Offset> points,
-    Color fill,
-    double alpha,
-  ) {
-    final path = Path()
-      ..moveTo(points[0].dx, points[0].dy)
-      ..lineTo(points[1].dx, points[1].dy)
-      ..lineTo(points[2].dx, points[2].dy)
-      ..close();
-
-    final fillPaint = Paint()
-      ..style = PaintingStyle.fill
-      ..color = fill.withValues(alpha: alpha);
-
-    final strokePaint = Paint()
-      ..style = PaintingStyle.stroke
-      ..strokeWidth = strokeWidth
-      ..color = strokeColor.withValues(alpha: alpha);
-
-    if (showFill) {
-      canvas.drawPath(path, fillPaint);
-    }
-    canvas.drawPath(path, strokePaint);
   }
 
   @override
-  bool shouldRepaint(covariant _TriangleLoadingPainter oldDelegate) => true;
+  bool shouldRepaint(covariant _StandardPainter oldDelegate) =>
+      animation != oldDelegate.animation ||
+      iterations != oldDelegate.iterations ||
+      targetDeg != oldDelegate.targetDeg ||
+      trianglesPerCycle != oldDelegate.trianglesPerCycle ||
+      buildToZoomTimeRatio != oldDelegate.buildToZoomTimeRatio ||
+      keepHistoryCycles != oldDelegate.keepHistoryCycles ||
+      strokeWidth != oldDelegate.strokeWidth ||
+      strokeColor != oldDelegate.strokeColor ||
+      background != oldDelegate.background ||
+      showFill != oldDelegate.showFill ||
+      baseColor != oldDelegate.baseColor ||
+      saturation != oldDelegate.saturation ||
+      lightness != oldDelegate.lightness ||
+      hueStep != oldDelegate.hueStep ||
+      maxDepth != oldDelegate.maxDepth ||
+      removingOld != oldDelegate.removingOld ||
+      oneByOne != oldDelegate.oneByOne ||
+      zoomSpin != oldDelegate.zoomSpin;
 }
 
-class _SolveResult {
-  const _SolveResult({required this.vertices, required this.scale});
+class _StandardGeometry {
+  _StandardGeometry({
+    required double stepDeg,
+    required int trianglesPerCycle,
+    required bool oneByOne,
+    required bool removingOld,
+    required int keepHistoryCycles,
+    required int maxDepth,
+  }) {
+    final radians = stepDeg * math.pi / 180;
+    final denominator = math.cos(radians) + math.sqrt(3) * math.sin(radians);
+    stepScale = denominator > 1 ? 1 / denominator : 1;
+    firstDepth = oneByOne || removingOld
+        ? 0
+        : -math.min(keepHistoryCycles * trianglesPerCycle, maxDepth - 1);
+    final lastDepth = math.min(
+      oneByOne ? trianglesPerCycle + 1 : trianglesPerCycle,
+      maxDepth - 1,
+    );
+    for (var depth = firstDepth; depth <= lastDepth; depth++) {
+      final radius = math.pow(stepScale, depth).toDouble();
+      paths[depth] = Path()
+        ..addPolygon(
+          List.generate(3, (corner) {
+            final angle =
+                -math.pi / 2 + depth * radians + corner * 2 * math.pi / 3;
+            return Offset(radius * math.cos(angle), radius * math.sin(angle));
+          }),
+          true,
+        );
+    }
+  }
 
-  final List<Offset> vertices;
-  final double scale;
+  late final double stepScale;
+  late final int firstDepth;
+  final paths = <int, Path>{};
 }
 
-class _Affine {
-  const _Affine({
-    required this.a,
-    required this.b,
-    required this.c,
-    required this.d,
-    required this.tx,
-    required this.ty,
-  });
+class _FuzePainter extends CustomPainter {
+  const _FuzePainter({
+    required this.style,
+    required this.strokeWidth,
+    required this.strokeColor,
+    required this.background,
+    required this.showFill,
+    required this.fillColors,
+    required this.animation,
+    required this.iterations,
+    required this.color,
+    required this.reducedMotion,
+  }) : super(repaint: animation);
 
-  final double a;
-  final double b;
-  final double c;
-  final double d;
-  final double tx;
-  final double ty;
+  final Animation<double> animation;
+  final int iterations;
+  double get progress => animation.value.clamp(0.0, 1.0) * iterations;
+  final Color color;
+  final bool reducedMotion;
+
+  final FuzeStyle style;
+  final double strokeWidth;
+  final Color strokeColor;
+  final Color background;
+  final bool showFill;
+  final List<Color> fillColors;
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    if (style == FuzeStyle.noEnd) {
+      _paintNoEnd(canvas, size);
+    } else {
+      final fraction =
+          progress > 0 && (progress - progress.round()).abs() < 1e-9
+          ? 1.0
+          : progress % 1;
+      _paintTrace(canvas, size, fraction);
+    }
+  }
+
+  void _paintTrace(Canvas canvas, Size size, double progress) {
+    final scale = math.min(size.width, size.height) / 900;
+    canvas.save();
+    canvas.translate(
+      (size.width - 900 * scale) / 2,
+      (size.height - 900 * scale) / 2,
+    );
+    canvas.scale(scale);
+    canvas.drawCircle(const Offset(450, 450), 445, Paint()..color = background);
+    if (showFill) {
+      const triangles = [
+        [
+          Offset(450, 9.45),
+          Offset(831.5275, 670.275),
+          Offset(68.4725, 670.275),
+        ],
+        [
+          Offset(548.3474, 179.7927),
+          Offset(634.8327, 670.275),
+          Offset(166.8199, 499.9323),
+        ],
+        [
+          Offset(570.641, 306.2257),
+          Offset(514.1917, 626.3653),
+          Offset(265.1673, 417.409),
+        ],
+        [
+          Offset(556.0899, 388.749),
+          Offset(450, 572.502),
+          Offset(343.9101, 388.749),
+        ],
+      ];
+      for (var index = 0; index < triangles.length; index++) {
+        canvas.drawPath(
+          Path()..addPolygon(triangles[index], true),
+          Paint()..color = fillColors[index].withValues(alpha: 1 - progress),
+        );
+      }
+    }
+    final stroke = Paint()
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = strokeWidth / scale
+      ..strokeCap = StrokeCap.round
+      ..strokeJoin = StrokeJoin.round
+      ..color = strokeColor;
+    final metric = _FuzeGeometry.metric;
+    final distance = metric.length * progress;
+    canvas.drawPath(metric.extractPath(distance, metric.length), stroke);
+    if (progress <= 0 || progress >= 1) {
+      canvas.restore();
+      return;
+    }
+    final tip = metric.getTangentForOffset(distance)!.position;
+    final emberRadius = math.max(1.5, strokeWidth * 0.9) / scale;
+    final glowRadius = emberRadius * 4;
+    canvas.drawCircle(
+      tip,
+      glowRadius,
+      Paint()
+        ..shader = RadialGradient(
+          colors: [
+            const Color(0xFFFFB347).withValues(alpha: 0.85),
+            const Color(0xFFFF6B00).withValues(alpha: 0),
+          ],
+        ).createShader(Rect.fromCircle(center: tip, radius: glowRadius)),
+    );
+    canvas.drawCircle(
+      tip,
+      emberRadius,
+      Paint()..color = const Color(0xFFFFF1DC),
+    );
+    canvas.restore();
+  }
+
+  void _paintNoEnd(Canvas canvas, Size size) {
+    final route = _FuzeGeometry.route;
+    final scale = math.min(size.width, size.height) / 1040;
+    canvas.save();
+    canvas.translate(
+      (size.width - 900 * scale) / 2,
+      (size.height - 900 * scale) / 2,
+    );
+    canvas.scale(scale);
+    final stroke = Paint()
+      ..style = PaintingStyle.stroke
+      ..strokeCap = StrokeCap.round
+      ..strokeJoin = StrokeJoin.round
+      ..strokeWidth = 44
+      ..color = color.withValues(alpha: color.a * 0.35);
+    canvas.drawPath(route, stroke);
+    stroke
+      ..strokeWidth = 60
+      ..color = color;
+    if (reducedMotion) {
+      canvas.drawPath(route, stroke);
+    } else {
+      final metric = _FuzeGeometry.metric;
+      final start = (progress % 1) * metric.length;
+      final end = start + metric.length * 0.26;
+      canvas.drawPath(
+        metric.extractPath(start, math.min(end, metric.length)),
+        stroke,
+      );
+      if (end > metric.length) {
+        canvas.drawPath(metric.extractPath(0, end - metric.length), stroke);
+      }
+      final head = metric.getTangentForOffset(end % metric.length)!;
+      final forward = head.vector;
+      final normal = Offset(-forward.dy, forward.dx);
+      final tip = head.position + forward * 80;
+      final base = head.position - forward * 40;
+      canvas.drawPath(
+        Path()..addPolygon([tip, base + normal * 66, base - normal * 66], true),
+        Paint()..color = color,
+      );
+    }
+    canvas.restore();
+  }
+
+  @override
+  bool shouldRepaint(covariant _FuzePainter oldDelegate) =>
+      style != oldDelegate.style ||
+      strokeWidth != oldDelegate.strokeWidth ||
+      strokeColor != oldDelegate.strokeColor ||
+      background != oldDelegate.background ||
+      showFill != oldDelegate.showFill ||
+      !listEquals(fillColors, oldDelegate.fillColors) ||
+      animation != oldDelegate.animation ||
+      iterations != oldDelegate.iterations ||
+      color != oldDelegate.color ||
+      reducedMotion != oldDelegate.reducedMotion;
+}
+
+class _FuzeGeometry {
+  static final triangles = Path()
+    ..moveTo(450, 9.45)
+    ..lineTo(548.3474, 179.7927)
+    ..lineTo(831.5275, 670.275)
+    ..lineTo(634.8327, 670.275)
+    ..lineTo(68.4725, 670.275)
+    ..lineTo(166.8199, 499.9323)
+    ..lineTo(514.1917, 626.3653)
+    ..lineTo(634.8327, 670.275)
+    ..lineTo(570.641, 306.2257)
+    ..lineTo(548.3474, 179.7927)
+    ..lineTo(265.1673, 417.409)
+    ..lineTo(343.9101, 388.749)
+    ..lineTo(570.641, 306.2257)
+    ..lineTo(556.0899, 388.749)
+    ..lineTo(514.1917, 626.3653)
+    ..lineTo(450, 572.502)
+    ..lineTo(556.0899, 388.749)
+    ..lineTo(343.9101, 388.749)
+    ..lineTo(450, 572.502)
+    ..lineTo(265.1673, 417.409)
+    ..lineTo(166.8199, 499.9323)
+    ..lineTo(450, 9.45);
+
+  static final route = Path()
+    ..moveTo(450, 9.45)
+    ..arcToPoint(
+      const Offset(831.5275, 670.275),
+      radius: const Radius.circular(445),
+    )
+    ..arcToPoint(
+      const Offset(68.4725, 670.275),
+      radius: const Radius.circular(445),
+    )
+    ..arcToPoint(const Offset(450, 9.45), radius: const Radius.circular(445))
+    ..extendWithPath(triangles, Offset.zero);
+
+  static final metric = route.computeMetrics().single;
 }

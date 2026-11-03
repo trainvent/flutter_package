@@ -9,6 +9,7 @@ that is reused by more than one application.
 - `lib/trainvent_general.dart` is the public entry point.
 - `lib/src/` contains implementation files.
 - `test/` contains package tests.
+- `example/` contains the runnable widget gallery.
 
 ## Getting started
 
@@ -49,9 +50,41 @@ the current theme's primary color; use `baseColor` to override it. You can also
 provide an `Animation<double>` through `progress` when another controller should
 drive the indicator.
 
+Standard uses the original forward hue progression. With fills enabled, the
+7° step per triangle repeats after 60 iterations (204 seconds, seven hue turns).
+Outline-only mode repeats after two iterations. Triangle paths remain cached,
+and animation frames repaint without rebuilding widgets. The loop length is
+calculated from the geometry and hue step; for example, 7.5° needs eight iterations.
+
+The indicator has two animation categories: `TriangleLoadingIndicatorMode.standard`
+and `TriangleLoadingIndicatorMode.fuze`. Fuze shares one circle-and-triangle route
+with two playback styles:
+
+```dart
+const TriangleLoadingIndicator(
+  mode: TriangleLoadingIndicatorMode.fuze,
+  fuzeStyle: FuzeStyle.trace, // Or FuzeStyle.noEnd.
+)
+```
+
+`trace` starts with the complete outline and burns it away behind a glowing ember. `noEnd` loops a moving arrow over a
+faint guide, using `baseColor` or the theme primary color and a default 1.8-second
+iteration. Select the category and Fuze style separately in the example app.
+
 ## Development
 
-Run checks from this directory:
+Run the example app:
+
+```sh
+cd example
+flutter pub get
+flutter run
+```
+
+The example references this package through a local path dependency. Edit widgets
+in `lib/src/` and hot reload the example to preview changes.
+
+Run checks from the package directory:
 
 ```sh
 flutter analyze
