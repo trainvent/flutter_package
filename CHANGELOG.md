@@ -1,3 +1,7 @@
+## 0.0.7
+
+* Migrate from `package:flutter/material.dart` to the `material_ui` package; apps using this package now also depend on `material_ui`.
+
 ## 0.0.6
 
 * Rename the animation types to Place (the default) and Trace.
