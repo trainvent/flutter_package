@@ -1,4 +1,4 @@
-import 'package:flutter/material.dart';
+import 'package:material_ui/material_ui.dart';
 import 'package:trainvent_general/trainvent_general.dart';
 
 import 'triangle_loading_indicator_screen.dart';
