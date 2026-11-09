@@ -189,6 +189,9 @@ class _TriangleLoadingIndicatorState extends State<TriangleLoadingIndicator>
         oldWidget.zoomSpin != widget.zoomSpin ||
         oldWidget.mode != widget.mode ||
         oldWidget.traceStyle != widget.traceStyle) {
+      if (oldWidget.progress != null && widget.progress == null) {
+        _controller.value = 0;
+      }
       _syncAutoplay();
     }
   }
