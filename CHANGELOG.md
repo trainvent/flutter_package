@@ -1,4 +1,4 @@
-## Unreleased
+## 0.0.8
 
 * Add `TriangleRefreshIndicator`, a pull-to-refresh that winds the Continuous trace while pulling and runs it while refreshing.
 * Restart autoplay from the first frame when `progress` is removed.
