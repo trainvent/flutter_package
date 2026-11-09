@@ -72,6 +72,26 @@ faint guide, using `baseColor` or the theme primary color and a default 1.8-seco
 iteration. Set `showArrow: false` to hide the Continuous arrowhead. Select the
 type and Trace style separately in the example app.
 
+### Pull to refresh
+
+`TriangleRefreshIndicator` replaces Material's `RefreshIndicator` with the
+Continuous trace. Pulling winds the trace with the drag; releasing past
+`triggerDistance` (80 by default) calls `onRefresh`, and the trace runs until its
+future completes.
+
+```dart
+TriangleRefreshIndicator(
+  onRefresh: reload,
+  child: ListView(
+    physics: const AlwaysScrollableScrollPhysics(),
+    children: items,
+  ),
+)
+```
+
+As with `RefreshIndicator`, give the scrollable `AlwaysScrollableScrollPhysics` so
+short lists can still be pulled.
+
 ## Development
 
 Run the example app:

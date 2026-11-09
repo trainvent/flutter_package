@@ -1,3 +1,8 @@
+## Unreleased
+
+* Add `TriangleRefreshIndicator`, a pull-to-refresh that winds the Continuous trace while pulling and runs it while refreshing.
+* Restart autoplay from the first frame when `progress` is removed.
+
 ## 0.0.7
 
 * Migrate from `package:flutter/material.dart` to the `material_ui` package; apps using this package now also depend on `material_ui`.
