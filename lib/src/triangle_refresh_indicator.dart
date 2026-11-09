@@ -1,14 +1,12 @@
-import 'dart:math' as math;
-
 import 'package:material_ui/material_ui.dart';
 
 import 'triangle_loading_indicator.dart';
 
 /// Pull-to-refresh with the Continuous trace instead of Material's spinner.
 ///
-/// Pulling down past the top of [child] winds the trace forward with the drag.
-/// Releasing beyond [triggerDistance] calls [onRefresh], and the trace runs
-/// until the returned future completes.
+/// Pulling down past the top of [child] slides the indicator in from above
+/// and winds the trace with the drag. Releasing beyond [triggerDistance] calls
+/// [onRefresh], and the trace runs until the returned future completes.
 ///
 /// Like [RefreshIndicator], the scrollable inside [child] needs
 /// [AlwaysScrollableScrollPhysics] so short lists can still be pulled.
@@ -19,7 +17,7 @@ class TriangleRefreshIndicator extends StatefulWidget {
     required this.onRefresh,
     this.triggerDistance = 80,
     this.displacement = 40,
-    this.size = 40,
+    this.size = 48,
     this.color,
     this.backgroundColor,
     this.semanticsLabel,
@@ -57,41 +55,64 @@ class TriangleRefreshIndicator extends StatefulWidget {
       _TriangleRefreshIndicatorState();
 }
 
-class _TriangleRefreshIndicatorState extends State<TriangleRefreshIndicator> {
-  static const _fadeDuration = Duration(milliseconds: 200);
-  static const _traceInset = 0.2;
+enum _Phase { idle, dragging, refreshing, finishing }
 
+class _TriangleRefreshIndicatorState extends State<TriangleRefreshIndicator>
+    with TickerProviderStateMixin {
+  static const _settleDuration = Duration(milliseconds: 200);
+  static const _traceInset = 0.14;
+
+  /// The pull as a share of the trigger distance. It drives the slide and the
+  /// trace directly, so dragging repaints only the indicator.
+  late final AnimationController _pull = AnimationController(
+    vsync: this,
+    upperBound: double.infinity,
+  );
+
+  /// Shrinks the indicator away once a refresh has finished.
+  late final AnimationController _finish = AnimationController(
+    vsync: this,
+    duration: _settleDuration,
+  );
+
+  _Phase _phase = _Phase.idle;
   double _pulled = 0;
-  bool _dragging = false;
-  bool _refreshing = false;
 
-  double get _fraction =>
-      (_pulled / widget.triggerDistance).clamp(0.0, 1.0).toDouble();
+  @override
+  void dispose() {
+    _pull.dispose();
+    _finish.dispose();
+    super.dispose();
+  }
 
   bool _onScroll(ScrollNotification notification) {
-    if (!widget.notificationPredicate(notification) || _refreshing) {
+    if (!widget.notificationPredicate(notification) ||
+        _phase == _Phase.refreshing ||
+        _phase == _Phase.finishing) {
       return false;
     }
-    final atTop = notification.metrics.extentBefore == 0;
+    final dragging = _phase == _Phase.dragging;
     switch (notification) {
-      case ScrollStartNotification(dragDetails: _?) when atTop:
-        _dragging = true;
+      case ScrollStartNotification(dragDetails: _?)
+          when notification.metrics.extentBefore == 0:
+        _phase = _Phase.dragging;
+        _pull.stop();
         _setPulled(0);
       case OverscrollNotification(:final overscroll, dragDetails: _?)
-          when _dragging && overscroll < 0:
+          when dragging && overscroll < 0:
         _setPulled(_pulled - overscroll);
       // A bouncing list springs back before it ends, so the first update
       // without a finger is the release.
-      case ScrollUpdateNotification(dragDetails: null) when _dragging:
+      case ScrollUpdateNotification(dragDetails: null) when dragging:
         _release();
       case ScrollUpdateNotification(:final metrics, :final scrollDelta?)
-          when _dragging:
+          when dragging:
         if (metrics.pixels < 0) {
           _setPulled(-metrics.pixels);
         } else if (scrollDelta > 0 && _pulled > 0) {
-          _setPulled(math.max(0, _pulled - scrollDelta));
+          _setPulled((_pulled - scrollDelta).clamp(0, double.infinity));
         }
-      case ScrollEndNotification() when _dragging:
+      case ScrollEndNotification() when dragging:
         _release();
       default:
         break;
@@ -99,29 +120,36 @@ class _TriangleRefreshIndicatorState extends State<TriangleRefreshIndicator> {
     return false;
   }
 
+  void _setPulled(double value) {
+    _pulled = value;
+    _pull.value = value / widget.triggerDistance;
+  }
+
   void _release() {
-    _dragging = false;
     if (_pulled >= widget.triggerDistance) {
       _refresh();
     } else {
-      _setPulled(0);
+      _phase = _Phase.idle;
+      _pulled = 0;
+      _pull.animateTo(0, duration: _settleDuration, curve: Curves.easeOut);
     }
   }
 
-  void _setPulled(double value) {
-    if (value != _pulled) setState(() => _pulled = value);
-  }
-
   Future<void> _refresh() async {
-    setState(() => _refreshing = true);
+    setState(() => _phase = _Phase.refreshing);
+    _pull.animateTo(1, duration: _settleDuration, curve: Curves.easeOut);
     try {
       await widget.onRefresh();
     } finally {
       if (mounted) {
-        setState(() {
-          _refreshing = false;
+        setState(() => _phase = _Phase.finishing);
+        await _finish.forward(from: 0);
+        if (mounted) {
+          _pull.value = 0;
           _pulled = 0;
-        });
+          _finish.value = 0;
+          setState(() => _phase = _Phase.idle);
+        }
       }
     }
   }
@@ -129,11 +157,8 @@ class _TriangleRefreshIndicatorState extends State<TriangleRefreshIndicator> {
   @override
   Widget build(BuildContext context) {
     final colors = Theme.of(context).colorScheme;
-    final visible = _refreshing || _pulled > 0;
-    final top = _refreshing
-        ? widget.displacement
-        : _fraction * widget.displacement;
-    final indicator = Container(
+    final running = _phase == _Phase.refreshing || _phase == _Phase.finishing;
+    final disc = Container(
       width: widget.size,
       height: widget.size,
       padding: EdgeInsets.all(widget.size * _traceInset),
@@ -147,7 +172,7 @@ class _TriangleRefreshIndicatorState extends State<TriangleRefreshIndicator> {
         mode: TriangleLoadingIndicatorMode.trace,
         traceStyle: TraceStyle.continuous,
         baseColor: widget.color ?? colors.primary,
-        progress: _refreshing ? null : AlwaysStoppedAnimation(_fraction),
+        progress: running ? null : _pull,
       ),
     );
     return NotificationListener<ScrollNotification>(
@@ -155,29 +180,41 @@ class _TriangleRefreshIndicatorState extends State<TriangleRefreshIndicator> {
       child: Stack(
         children: [
           widget.child,
-          Positioned(
-            top: top,
-            left: 0,
-            right: 0,
-            child: IgnorePointer(
-              child: AnimatedOpacity(
-                opacity: visible ? (_refreshing ? 1 : _fraction) : 0,
-                duration: _fadeDuration,
-                child: Center(
-                  child: _refreshing
-                      ? Semantics(
-                          liveRegion: true,
-                          label:
-                              widget.semanticsLabel ??
-                              MaterialLocalizations.of(
-                                context,
-                              ).refreshIndicatorSemanticLabel,
-                          child: indicator,
-                        )
-                      : indicator,
+          AnimatedBuilder(
+            animation: Listenable.merge([_pull, _finish]),
+            child: running
+                ? Semantics(
+                    liveRegion: true,
+                    label:
+                        widget.semanticsLabel ??
+                        MaterialLocalizations.of(
+                          context,
+                        ).refreshIndicatorSemanticLabel,
+                    child: disc,
+                  )
+                : disc,
+            builder: (context, child) {
+              final reach = _pull.value.clamp(0.0, 1.0);
+              final shown = 1 - _finish.value;
+              final hidden = reach == 0 && !running;
+              return Positioned(
+                // Slides in from just above the top edge to its resting spot.
+                top: -widget.size + reach * (widget.size + widget.displacement),
+                left: 0,
+                right: 0,
+                child: IgnorePointer(
+                  child: Offstage(
+                    offstage: hidden,
+                    child: Center(
+                      child: Opacity(
+                        opacity: shown,
+                        child: Transform.scale(scale: shown, child: child),
+                      ),
+                    ),
+                  ),
                 ),
-              ),
-            ),
+              );
+            },
           ),
         ],
       ),

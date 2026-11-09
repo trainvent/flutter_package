@@ -31,6 +31,20 @@ void main() {
   TriangleLoadingIndicator trace(WidgetTester tester) =>
       tester.widget(find.byType(TriangleLoadingIndicator));
 
+  bool hidden(WidgetTester tester) => tester
+      .widget<Offstage>(
+        find
+            .ancestor(
+              of: find.byType(TriangleLoadingIndicator, skipOffstage: false),
+              matching: find.byType(Offstage, skipOffstage: false),
+            )
+            .first,
+      )
+      .offstage;
+
+  double discTop(WidgetTester tester) =>
+      tester.getTopLeft(find.byType(TriangleLoadingIndicator)).dy;
+
   Future<void> pull(WidgetTester tester, double distance) async {
     final gesture = await tester.startGesture(tester.getCenter(find.text('0')));
     for (var moved = 0.0; moved < distance; moved += 10) {
@@ -68,10 +82,7 @@ void main() {
       expect(trace(tester).progress, isNull);
 
       await finish(tester);
-      expect(
-        tester.widget<AnimatedOpacity>(find.byType(AnimatedOpacity)).opacity,
-        0,
-      );
+      expect(hidden(tester), isTrue);
     });
   }
 
@@ -87,10 +98,46 @@ void main() {
     final wound = trace(tester).progress!.value;
     expect(wound, greaterThan(0));
     expect(wound, lessThan(1));
+    final top = discTop(tester);
+    await gesture.moveBy(const Offset(0, 10));
+    await tester.pump();
+    expect(discTop(tester), greaterThan(top));
 
     await gesture.up();
     await tester.pumpAndSettle();
     expect(refreshes, 0);
+    expect(hidden(tester), isTrue);
+  });
+
+  testWidgets('pulling does not rebuild the list', (tester) async {
+    var builds = 0;
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: TriangleRefreshIndicator(
+            onRefresh: () async {},
+            child: Builder(
+              builder: (context) {
+                builds++;
+                return ListView(
+                  physics: const AlwaysScrollableScrollPhysics(),
+                  children: const [ListTile(title: Text('0'))],
+                );
+              },
+            ),
+          ),
+        ),
+      ),
+    );
+    final before = builds;
+    final gesture = await tester.startGesture(tester.getCenter(find.text('0')));
+    for (var i = 0; i < 5; i++) {
+      await gesture.moveBy(const Offset(0, 10));
+      await tester.pump();
+    }
+    expect(builds, before);
+    await gesture.up();
+    await tester.pumpAndSettle();
   });
 
   testWidgets('pulling while refreshing does not start another refresh', (
